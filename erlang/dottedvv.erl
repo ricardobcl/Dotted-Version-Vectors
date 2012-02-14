@@ -1,8 +1,11 @@
-%% -------------------------------------------------------------------
+
+%%-------------------------------------------------------------------
 %%
-%% riak_core: Core Riak Application
+%% File:      dottedvv.erl
 %%
-%% Copyright (c) 2007-2010 Basho Technologies, Inc.  All Rights Reserved.
+%% @author    Ricardo Gonçalves <tome.wave@gmail.com>
+%%
+%% @copyright 2011 Ricardo Gonçalves 
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -18,16 +21,14 @@
 %% specific language governing permissions and limitations
 %% under the License.
 %%
-%% -------------------------------------------------------------------
-
-%% @doc A simple Erlang implementation of vector clocks as inspired by Lamport logical clocks.
+%% @doc  
+%%	A simple Erlang implementation of Dotted Version Vectors.
+%% @end  
 %%
-%% @reference Leslie Lamport (1978). "Time, clocks, and the ordering of events
-%% in a distributed system". Communications of the ACM 21 (7): 558-565.
+%% @reference Dotted Version Vectors: Logical Clocks for Optimistic Replication
+%% URL: http://arxiv.org/abs/1011.5808
 %%
-%% @reference Friedemann Mattern (1988). "Virtual Time and Global States of
-%% Distributed Systems". Workshop on Parallel and Distributed Algorithms:
-%% pp. 215-226
+%%-------------------------------------------------------------------
 
 -module(dottedvv).
 
