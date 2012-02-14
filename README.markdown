@@ -15,11 +15,17 @@ Then, we propose a novel, scalable solution that fully captures causality:
 it maintains very concise information that grows
 linearly only with the number of servers that register updates for a given
 data element, bounded by the degree of replication.
-Moreover, causality can be checked in $O(1)$ time instead of $O(n)$ time
+Moreover, causality can be checked in __O(1)__ time instead of __O(n)__ time
 for version vectors.
 We have integrated our solution in Riak, and results with realistic benchmarks
-show that it can use as little as 10\% of the space consumed by current version
+show that it can use as little as 10% of the space consumed by current version
 vector implementation, which includes an unsafe pruning mechanism.
+
+Article
+-------
+
+This implementation is based on the following article: 
+	[Dotted Version Vectors: Logical Clocks for Optimistic Replication](http://arxiv.org/abs/1011.5808)
 
 Core Functions
 --------------
@@ -49,16 +55,12 @@ It exports the following functions:
 *	fresh/0
 *	descends/2
 *	sync/2
-*	get_counter/2
-*	get_timestamp/2
 *	update/3
-*	all_nodes/1
 *	equal/2
 *	increment/2
 *	merge/1
-*	get_max_counter/2
 
-Author
+Authors
 ------
 
 Article: 
@@ -82,15 +84,15 @@ How To Use
 		% C = []
         C = dottedvv:fresh(),
 
-		% Increment count of id
+		% Increment count C with id
 		% C2 = [(id,1)]
 		C2 = dottedvv:increment(id, C),
 		
-		% Update
+		% Get an updated clock in id, more recent than the args
 		% C3 = [(id,2)]
 		C3 = dottedvv:update(C2, C2, id),
 		
-		% Update an existing value
+		% Synchronize 2 clocks
 		C3 = dottedvv:sync(C3, C).
 ```
 
@@ -101,4 +103,4 @@ TODO
 
 *	Clean code (debug code)
 *	Add new cover tests
-*	Change structure to 
+*	Change structure to checked causality in _O(1)_ time instead of _O(n)_.
