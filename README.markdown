@@ -25,7 +25,7 @@ Article
 -------
 
 This implementation is based on the following article: 
-	[Dotted Version Vectors: Logical Clocks for Optimistic Replication](http://arxiv.org/abs/1011.5808)
+	[Dotted Version Vectors: Logical Clocks for Optimistic Replication](http://gsd.di.uminho.pt/members/vff/dotted-version-vectors-2012.pdf)
 
 Core Functions
 --------------

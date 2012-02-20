@@ -34,51 +34,85 @@
 
 -author('Ricardo Goncalves <tome@di.uminho.pt>').
 
--export([fresh/0,descends/2,sync/2,get_counter/2,get_timestamp/2,
+-export([fresh/0,descends/2,strict_descends/2,sync/2,get_counter/2,get_timestamp/2,
 	update/3,all_nodes/1,equal/2,increment/2,merge/1,get_max_counter/2]).
 
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
 
--type dottedvv() :: [dvv_entry()].
--type dvv_entry() :: {dvv_id(), {counterM(), timestamp()}} |
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% STRUCTURE
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+-type dottedvv() :: [entry()].
+-type entry() :: {dvv_id(), {counterM(), timestamp()}} |
 					{dvv_id(), {counterM(), counterN(), timestamp()}} .
 
-% ids can have any term() as a name, but they must differ from each other.
 -type   dvv_id() :: term().
 -type   counterM() :: integer().
 -type   counterN() :: integer().
 -type   timestamp() :: integer().
 
+
+
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% FUNCTIONS
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % @doc Create a brand new dottedvv.
 -spec fresh() -> dottedvv().
 fresh() -> [].
 
 
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % @doc Return true if Va is a direct descendant of Vb, else false -- remember, a dottedvv is its own descendant!
 -spec descends(Va :: [dottedvv()], Vb :: [dottedvv()]) -> boolean()
 			; (Va :: dottedvv(), Vb :: dottedvv()) -> boolean().
 descends(A,B) ->
 	A2 = lists:flatten(A),
 	B2 = lists:flatten(B),
+	case (A2 =:= []) of
+		true -> false;
+		false -> 
+			case (A2 =:= B2) of
+				true -> true;
+				false -> descends1(A,B)
+			end
+	end.
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% @doc Return true if Va is a direct descendant of Vb, else false -- remember, a dottedvv is NOT its own descendant!
+-spec strict_descends(Va :: [dottedvv()], Vb :: [dottedvv()]) -> boolean()
+			; (Va :: dottedvv(), Vb :: dottedvv()) -> boolean().
+strict_descends(A,B) ->
+	A2 = lists:flatten(A),
+	B2 = lists:flatten(B),
 	case (A2 =:= B2) and (A2 =:= []) of
 		true -> false;
 		false -> descends1(A,B)
 	end.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% AUX
 descends1(_, []) -> true;
 descends1(S1=[{_,_}|_],S2) -> descends1([S1],S2);
 descends1(S1,S2=[{_,_}|_]) -> descends1(S1,[S2]);
 descends1(S1, S2) ->
 	descends2(S1,S2).
-	%		file:write_file("/Users/ricardoG/Desktop/reii2.txt",lists:flatten(io_lib:format("@2~n A:~p!~n B:~p!~n Res:~p!~n",[S1,S2,Res]))++"!\n",[append]),
-	%Res.
-%    Trues = [[descends_aux(O1,O2) andalso (descends_aux(O2,O1)==false)
-%			|| O2 <- Vb]
-%                || O1 <- Va],
-%	Trues2 = lists:flatten(Trues),
-%	io:format("trues: ~p~n", [Trues2]),
-%    lists:foldl(fun(X, Sum) -> X and Sum end, true, Trues2).
-%
-
 
 descends2(_,[]) ->
 	true;
@@ -93,7 +127,7 @@ descends2([H|T],S) ->
 belongsDelete(_,[]) ->
 	false;
 belongsDelete(E,[H|T]) ->
-	case descends_aux(lists:flatten(E),lists:flatten(H)) andalso (equal(E,H)==false) of
+	case descends_aux(lists:flatten(E),lists:flatten(H)) and (equal(E,H)==false) of
 		true -> {true,T};
 		false -> belongsDelete(E,T)
 	end.
@@ -102,83 +136,101 @@ belongsDelete(E,[H|T]) ->
 descends_aux(_, []) ->
     % all dottedvvs descend from the empty dottedvv
     true;
-descends_aux(Va, [{IdB, {CtrB, _}}|Vbtail]) ->
+descends_aux(Va, [{IdB, {CtrB, TsB}}|Vbtail]) ->
     CtrA = 
-	case get_counter(IdB, Va) of
-	    undefined -> false;
-	    {CAm, CAn} -> if CAn == CAm+1 -> 
-							CAn;
-						true ->
-							{CAm, CAn}
-					end;
-	    CA -> CA
+	case get_counter_ts(IdB, Va) of
+	    0 -> false;
+	    {CAm, CAn, TsA} -> if 
+								CAn == CAm+1 -> 
+									{CAn, TsA};
+								true ->
+									{CAm, CAn, TsA}
+							end;
+	    {CA, TsA} -> {CA, TsA}
 	end,
-%	io:format("CA:~p CB:~p~n", [CtrA,CtrB]),
+%	io:format("CA:~p CA2:~p CB:~p~n", [Va,CtrA,[{IdB, {CtrB, TsB}}|Vbtail]]),
     case CtrA of
-	false -> 
-		false;
-	{CtrAm, _CtrAn} -> 
-	    if CtrB > CtrAm->
-		    false;
-		true ->
-		    descends_aux(Va,Vbtail)
-	    end;
-	_ -> 
-	    if
-		CtrA < CtrB ->
-		    false;
-		true ->
-		    descends_aux(Va,Vbtail)
-	    end
+		false ->
+			false;
+		{CtrAm, _CtrAn, TsA2} ->
+		    if 
+				CtrB > CtrAm ->
+			    	false;
+				(CtrAm == CtrB) and (TsA2 < TsB) ->
+					false;
+				true ->
+			    	descends_aux(Va,Vbtail)
+		    end;
+		{CA2, TsA2} -> 
+		    if 
+				CtrB > CA2 ->
+			    	false;
+				(CA2 == CtrB) and (TsA2 < TsB) ->
+					false;
+				true ->
+			    	descends_aux(Va,Vbtail)
+		    end
     end;
 descends_aux(Va, [{IdB, {CtrBm, CtrBn, T}}|Vbtail]) when CtrBn == CtrBm+1 ->
 	descends_aux(Va, ([{IdB, {CtrBn, T}}]++Vbtail));
-descends_aux(Va, [{IdB, {CtrBm, CtrBn, _T}}|Vbtail]) ->
+descends_aux(Va, [{IdB, {CtrBm, CtrBn, TsB}}|Vbtail]) ->
     CtrA = 
-	case get_counter(IdB, Va) of
-	    undefined -> false;
-	    {CAm, CAn} -> if CAn == CAm+1 -> 
-							CAn;
-						true ->
-							{CAm, CAn}
-					end;
-	    CA -> CA
+	case get_counter_ts(IdB, Va) of
+	    0 -> false;
+	    {CAm, CAn, TsA} -> if 
+								CAn == CAm+1 -> 
+									{CAn, TsA};
+								true ->
+									{CAm, CAn, TsA}
+							end;
+	    {CA, TsA} -> {CA, TsA}
 	end,
-	
 %	io:format("CA:~p CBm:~p CBn:~p~n", [CtrA,CtrBm,CtrBn]),
     case CtrA of
-	false -> 
-		false;
-	{CtrAm, CtrAn} -> 
-		if 	(CtrBn == CtrAn) and (CtrAm < CtrBm) ->
-				false;
-		 	(CtrBn == CtrAn) and (CtrAm >= CtrBm) ->
-		    	descends_aux(Va,Vbtail);
-		 	CtrBm == CtrAm -> %% CtrBn =/= CtrAn
-				false;
-	    	CtrBn > CtrAm ->
-		    	false;
+		false -> 
+			false;
+		{CtrAm, CtrAn, TsA2} -> 
+			if 	(CtrBn == CtrAn) and (CtrAm < CtrBm) ->
+					false;
+			 	(CtrBn == CtrAn) and (CtrAm > CtrBm) ->
+			    	descends_aux(Va,Vbtail);
+				(CtrBn == CtrAn) and (CtrAm == CtrBm) and (TsA2 < TsB) ->
+					false;
+				(CtrBn =/= CtrAn) and (CtrAm < CtrBm) ->
+					false;
+			 	CtrBm == CtrAm -> %% CtrBn =/= CtrAn 
+					false;
+		    	CtrBn > CtrAm ->
+			    	false;
+				true ->
+			    	descends_aux(Va,Vbtail)
+		    end;
+		{CA2, TsA2} -> 
+		    if
+			CtrA < CtrBm ->
+			    false;
+			CtrA < CtrBn ->
+			    false;
 			true ->
-		    	descends_aux(Va,Vbtail)
-	    end;
-	_ -> 
-	    if
-		CtrA < CtrBm ->
-		    false;
-		CtrA < CtrBn ->
-		    false;
-		true ->
-		    descends_aux(Va,Vbtail)
-	    end
+			    descends_aux(Va,Vbtail)
+		    end
     end.
 
 
+
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% @doc Merges the set of clocks, removing redundant information (old entries)
+-spec merge(S :: [dottedvv()]) -> dottedvv()
+			; (S :: dottedvv()) -> dottedvv().
 merge(S) -> merge2(lists:flatten(S)).
 merge2([]) -> [];
 merge2(S) ->
 	S2 = sets:from_list(S),
 	S3 = sets:to_list(S2),
-	Old = [[SB || SB <- S3, descends([SA],[SB])] || SA <- S3],
+	Old = [[SB || SB <- S3, strict_descends([SA],[SB])] || SA <- S3],
     Old2 = flatten(Old),
     VOld = sets:from_list(Old2),
     VRes = sets:subtract(S2, VOld),
@@ -186,6 +238,10 @@ merge2(S) ->
 	
 
 
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%% sync(S1,S2) -> S
 % @doc  Takes two clock sets and returns a clock set. 
 %		It returns a set of concurrent clocks, 
@@ -224,11 +280,21 @@ sync2(Set1, Set2) ->
 flatten([]) -> [];
 flatten([H|T]) -> H ++ flatten(T).
 
+
+
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % @doc Increment DottedVV at Node.
 -spec increment(Id :: dvv_id(), Dottedvv :: dottedvv()) -> dottedvv().
 increment(Id, Dottedvv) ->
 	update(Dottedvv, Dottedvv, Id).
 
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%% update(Sc,Sr,r) -> S
 % @doc Update dottedvv at Node.
 -spec update(Sc :: [dottedvv()], Sr :: [dottedvv()], IDr :: dvv_id()) -> dottedvv().
@@ -251,6 +317,9 @@ update2(Sc, Sr, IDr) ->
 
 
 
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%% ids(X) -> [id]
 % @doc Return the list of all nodes that have ever incremented dottedvv.
 -spec all_nodes(Dottedvv :: dottedvv()) -> [dvv_id()]
@@ -263,6 +332,7 @@ all_nodes(Dottedvv=[{_,_}|_]) ->
 
 
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%% [S]r -> max(Sr)
 % @private
 -spec get_max_counter(Id :: dvv_id(), [Dottedvv :: dottedvv()]) -> counterM().
@@ -310,21 +380,29 @@ get_max_counter_time_aux(Id, [_|Tail], Acc) ->
 	get_max_counter_time_aux(Id,Tail,Acc).
 	
 
+% @doc Get the counter value and timestamp in dottedvv set from Id.
+-spec get_counter_ts(Id :: dvv_id(), Dottedvv :: dottedvv()) -> counterM() | {counterM(),counterN()} | undefined.
+get_counter_ts(Id, Dottedvv) ->
+    case proplists:get_value(Id, Dottedvv) of
+	{M, T} -> {M, T};
+	{M, N, T} -> {M,N,T};
+	undefined -> 0
+    end.
 
-% @doc Get the counter value in dottedvv set from Node.
+% @doc Get the counter value in dottedvv set from Id.
 -spec get_counter(Id :: dvv_id(), Dottedvv :: dottedvv()) -> counterM() | {counterM(),counterN()} | undefined.
 get_counter(Id, Dottedvv) ->
     case proplists:get_value(Id, Dottedvv) of
 	{M, _} -> M;
 	{M, N, _} -> {M,N};
-	undefined -> undefined
+	undefined -> 0
     end.
 
 
-% @doc Get the timestamp value in a dottedvv set from Node.
--spec get_timestamp(Node :: dvv_id(), Dottedvv :: dottedvv()) -> timestamp() | undefined.
-get_timestamp(Node, Dottedvv) ->
-    case proplists:get_value(Node, Dottedvv) of
+% @doc Get the timestamp value in a dottedvv set from Id.
+-spec get_timestamp(Id :: dvv_id(), Dottedvv :: dottedvv()) -> timestamp() | undefined.
+get_timestamp(Id, Dottedvv) ->
+    case proplists:get_value(Id, Dottedvv) of
 	{_, _, TS} -> TS;
 	{_, TS} -> TS;
 	undefined -> undefined
@@ -337,6 +415,9 @@ timestamp() ->
 
 
 
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % @doc Compares two dottedvvs for equality.
 -spec equal(Dottedvv :: [dottedvv()], Dottedvv :: [dottedvv()]) -> boolean().
 equal([],[]) -> true;
@@ -380,6 +461,73 @@ equal3(VA,VB) ->
                 false -> true
             end
     end.
+
+
+
+%% ===================================================================
+%% EUnit tests
+%% ===================================================================
+-ifdef(TEST).
+
+% doc Serves as both a trivial test and some example code.
+example_test() ->
+    A = dottedvv:fresh(),
+    B = dottedvv:fresh(),
+    A1 = dottedvv:increment(a, A),
+    B1 = dottedvv:increment(b, B),
+    true = dottedvv:descends(A1,A),
+    true = dottedvv:descends(B1,B),
+    false = dottedvv:descends(A1,B1),
+    A2 = dottedvv:increment(a, A1),
+    C = dottedvv:merge([A2, B1]),
+    C1 = dottedvv:increment(c, C),
+    true = dottedvv:descends(C1, A2),
+    true = dottedvv:descends(C1, B1),
+    false = dottedvv:descends(B1, C1),
+    false = dottedvv:descends(B1, A1),
+    ok.
+
+
+accessor_test() ->
+    VC = [{<<"1">>, {1, 1}},
+          {<<"2">>, {2, 2}}],
+    ?assertEqual(1, get_counter(<<"1">>, VC)),
+    ?assertEqual(1, get_timestamp(<<"1">>, VC)),
+    ?assertEqual(2, get_counter(<<"2">>, VC)),
+    ?assertEqual(2, get_timestamp(<<"2">>, VC)),
+    ?assertEqual(0, get_counter(<<"3">>, VC)),
+    ?assertEqual(undefined, get_timestamp(<<"3">>, VC)),
+    ?assertEqual([<<"1">>, <<"2">>], lists:sort(all_nodes(VC))).
+
+merge_test() ->
+    VC1 = [{<<"1">>, {1, 1}},
+           {<<"2">>, {2, 2}},
+           {<<"4">>, {4, 4}}],
+    VC2 = [{<<"3">>, {3, 3}},
+           {<<"4">>, {3, 3}}],
+    ?assertEqual([], merge(dottedvv:fresh())),
+    ?assertEqual([{<<"1">>,{1,1}},{<<"2">>,{2,2}},{<<"3">>,{3,3}},{<<"4">>,{4,4}}],
+                 lists:sort(dottedvv:merge([VC1, VC2]))).
+
+merge_less_left_test() ->
+    VC1 = [{<<"5">>, {5, 5}}],
+    VC2 = [{<<"6">>, {6, 6}}, {<<"7">>, {7, 7}}],
+    ?assertEqual([{<<"5">>, {5, 5}},{<<"6">>, {6, 6}}, {<<"7">>, {7, 7}}],
+                 lists:sort(dottedvv:merge([VC1, VC2]))).
+
+merge_less_right_test() ->
+    VC1 = [{<<"6">>, {6, 6}}, {<<"7">>, {7, 7}}],
+    VC2 = [{<<"5">>, {5, 5}}],
+    ?assertEqual([{<<"5">>, {5, 5}},{<<"6">>, {6, 6}}, {<<"7">>, {7, 7}}],
+                 lists:sort(dottedvv:merge([VC1, VC2]))).
+
+merge_same_id_test() ->
+    VC1 = [{<<"1">>, {1, 2}},{<<"2">>,{1,4}}],
+    VC2 = [{<<"1">>, {1, 3}},{<<"3">>,{1,5}}],
+    ?assertEqual([{<<"1">>, {1, 3}},{<<"2">>,{1,4}},{<<"3">>,{1,5}}],
+                 lists:sort(dottedvv:merge([VC1, VC2]))).
+
+-endif.
 
 
 
