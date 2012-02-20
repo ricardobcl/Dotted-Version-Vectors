@@ -190,29 +190,22 @@ descends_aux(Va, [{IdB, {CtrBm, CtrBn, TsB}}|Vbtail]) ->
 		false -> 
 			false;
 		{CtrAm, CtrAn, TsA2} -> 
-			if 	(CtrBn == CtrAn) and (CtrAm < CtrBm) ->
-					false;
+			if 	(CtrAm > CtrBn) ->
+			    	descends_aux(Va,Vbtail);
 			 	(CtrBn == CtrAn) and (CtrAm > CtrBm) ->
 			    	descends_aux(Va,Vbtail);
-				(CtrBn == CtrAn) and (CtrAm == CtrBm) and (TsA2 < TsB) ->
-					false;
-				(CtrBn =/= CtrAn) and (CtrAm < CtrBm) ->
-					false;
-			 	CtrBm == CtrAm -> %% CtrBn =/= CtrAn 
-					false;
-		    	CtrBn > CtrAm ->
-			    	false;
+				(CtrBn == CtrAn) and (CtrAm == CtrBm) and (TsA2 >= TsB) ->
+			    	descends_aux(Va,Vbtail);
 				true ->
-			    	descends_aux(Va,Vbtail)
+			    	false
 		    end;
 		{CA2, TsA2} -> 
-		    if
-			CtrA < CtrBm ->
-			    false;
-			CtrA < CtrBn ->
-			    false;
-			true ->
-			    descends_aux(Va,Vbtail)
+		    if 	(CA2 > CtrBn) ->
+			    	descends_aux(Va,Vbtail);
+				(CtrBn == CA2) and (CtrBn == CtrBm+1) and (TsA2 >= TsB) ->
+			    	descends_aux(Va,Vbtail);
+				true ->
+			    	false
 		    end
     end.
 
@@ -486,6 +479,12 @@ example_test() ->
     false = dottedvv:descends(B1, C1),
     false = dottedvv:descends(B1, A1),
     ok.
+
+descends_test() ->
+	C1 = [{a,{1,1}}],
+	C2 = [{a,{1,2}}],
+	false = dottedvv:descends(C1, C2),
+	true = dottedvv:descends(C2, C1).
 
 
 accessor_test() ->
