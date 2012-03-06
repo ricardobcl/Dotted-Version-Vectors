@@ -21,6 +21,16 @@ We have integrated our solution in Riak, and results with realistic benchmarks
 show that it can use as little as 10% of the space consumed by current version
 vector implementation, which includes an unsafe pruning mechanism.
 
+
+
+Advantages vs Version Vectors (or Vector Clocks)
+-------
+
+*	Checks causality in _O(1)_ time instead of _O(n)_ in most cases.
+*	Multiple concurrent clocks in the same server.
+*	Allows __partial__ conflict resolution, instead of the "all or nothing" conflict resolution in version vectors.
+
+
 Article
 -------
 
@@ -29,7 +39,6 @@ This implementation is based on the following article:
 
 Core Functions
 --------------
-
 
 
 *	__sync(S1, S2)__:
@@ -69,30 +78,30 @@ Article:
 *	Paulo Sérgio Almeida <psa@di.uminho.pt>
 *	Victor Fonte <vff@di.uminho.pt>
 *	Nuno Preguiça <nmp@di.fct.unl.pt>
-*	Ricardo Gonçalves <tome@di.uminho.pt>
+*	Ricardo Tomé Gonçalves <tome@di.uminho.pt>
 
 
 Implementation: 
 
-*	Ricardo Gonçalves <tome.wave@gmail.com>
+*	Ricardo Tomé Gonçalves <tome.wave@gmail.com>
 
 How To Use
 ----------
 
 ```Erlang
 		% Create a new clock	
-		% C = []
+		% C = {}
         C = dottedvv:fresh(),
 
-		% Increment count C with id
-		% C2 = [(id,1)]
+		% Increment clock C in _Id_
+		% C2 = {[], {id,1}}
 		C2 = dottedvv:increment(id, C),
 		
-		% Get an updated clock in id, more recent than the args
-		% C3 = [(id,2)]
-		C3 = dottedvv:update(C2, C2, id),
+		% Get an updated clock in server _Id_, from _arg1_ (client clock) and _arg2_ (server clock)
+		% C3 = {[], {id,2}}
+		C3 = dottedvv:update(C2, C, id),
 		
-		% Synchronize 2 clocks
+		% Apply _sync_ with result of _update_ and the server clock, to discard all outdated information
 		C3 = dottedvv:sync(C3, C).
 ```
 
@@ -101,6 +110,4 @@ How To Use
 TODO
 ----
 
-*	Clean code (debug code)
 *	Add new cover tests
-*	Change structure to checked causality in _O(1)_ time instead of _O(n)_.
