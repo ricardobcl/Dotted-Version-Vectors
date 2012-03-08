@@ -91,7 +91,7 @@ update(Sc, Sr, Id) ->
 	{MaxC, _TS} = max_counter(Id, Sc),
 	{MaxR, _TS} = max_counter(Id, Sr),
 	Max = max(MaxC, MaxR),
-	V = [{Id2, max_counter(Id2, Sc)} || Id2 <- ids(Sc) , Id2 =/= Id],
+	V = [{Id2, max_counter(Id2, Sc)} || Id2 <- ids(Sc)],
 	Dot = {Id, {Max + 1 , new_timestamp()}},
 	{V, Dot}.
 	
@@ -107,30 +107,21 @@ increment(Id, C) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % @doc Return true if Va is a direct descendant of Vb, else false -- remember, a dottedvv is its own descendant!
--spec descends(Va :: [dottedvv()], Vb :: [dottedvv()]) -> boolean()
-			; (Va :: dottedvv(), Vb :: dottedvv()) -> boolean().
+-spec descends(dottedvv(), dottedvv()) -> boolean().
 			
  % all clocks descend from the empty clock
-descends(_, []) -> true;
 descends(_, {}) -> true;
-descends(A, [{VB,CB}]) -> descends(A,{VB,CB});
-descends([{VA,CA}], B) -> descends({VA,CA},B);
- % This case is used most of the time and computes in O(1)
-descends({_,{Id,{CA,TA}}}, {_,{Id,{CB,TB}}}) -> (CA > CB) orelse ((CA =:= CB) and (TA >= TB));
-descends(A,B) -> 
-	{A2,null} = merge(A),
-	{B2,null} = merge(B),
-	descends2(A2, B2).
-	
-descends2(_, []) -> true;
-descends2(A, B) ->
-    [{IdB, {CB, TB}}|TailB] = B,
-    case lists:keyfind(IdB, 1, A) of
-        false ->
-            false;
-        {_, {CA, TA}} ->
-            ((CA > CB) orelse ((CA =:= CB) and (TA >= TB))) andalso descends2(A,TailB)
-	end.
+descends(A, B) -> equal(A,B) orelse descends2(A,B).
+
+descends2({V,{I,{C,TA}}}, {V,{I,{C,TB}}}) -> (TA >= TB);
+descends2({V,{I,{CA,_TA}}}, {V,{I,{CB,_TB}}}) -> (CA > CB);
+descends2({VA,_DA}, {_VB,{IB,{CB,TB}}}) ->
+	case lists:keyfind(IB, 1, VA) of
+		{_, {CA, TA}} ->	
+			(CA > CB) orelse ((CA =:= CB) and (TA >= TB));
+		false -> false %% they are not equal, as it was tested in descends
+    end.
+
 			
 
 
@@ -225,7 +216,7 @@ sync(Set1, Set2) ->
 -spec ids(dottedvv()) -> [id()].
 
 ids(S) when is_list(S) -> ids2(merge(S));
-ids(S) -> ids2(S).
+ids(S) -> sets:to_list(sets:from_list(ids2(S))).
 
 ids2({}) -> [];
 ids2([]) -> [];
@@ -240,9 +231,8 @@ ids2(S) when is_list(S) -> [X || {X,{_,_}} <- S].
 %% Note: Could be improved if we checked all dots before merging (if it is a set)
 -spec max_counter(id(), [dottedvv()]) -> counter().
 
-max_counter(_, {}) -> {0,0};
 max_counter(Id, S) when is_list(S) -> max_counter(Id, merge(S));
-max_counter(Id, {S,D}) -> get_counter(Id, {lists:keysort(1, S), D}).
+max_counter(Id, S) -> get_counter(Id, S).
 
 
 
@@ -347,8 +337,31 @@ example_test() ->
 descends_test() ->
 	C1 = {[], {a,{1,1}}},
 	C2 = {[], {a,{1,2}}},
+	false = equal(C1, C2),
 	false = descends(C1, C2),
-	true = descends(C2, C1).
+	true = descends(C2, C1),
+    C3 = increment(a, C2),
+    C4 = increment(a, C3),
+    C5 = increment(a, C4),
+	true = descends(C5, C3),
+	true = descends(C5, C4),
+	true = descends(C5, C5),
+	false = descends(C4, C5),
+	false = descends(C1, C5),
+    C6 = increment(b, C5),
+    C7 = increment(a, C6),
+    C8 = increment(b, C7),
+	true = descends(C8, C3),
+	true = descends(C8, C5),
+	true = descends(C8, C6),
+	true = descends(C8, C7),
+	true = descends(C8, C8),
+	false = descends(C1, C8),
+	false = descends(C4, C8),
+	false = descends(C5, C8),
+	false = descends(C6, C8),
+	false = descends(C7, C8),
+	ok.
 
 accessor_test() ->
     C = {[{<<"1">>,{1,1}}], {<<"2">>,{2,2}}},
@@ -430,6 +443,7 @@ merge_same_id_test() ->
 % doc Unit Tests for others fucntions
 
 %% TODO
+
 
 -endif.
 
