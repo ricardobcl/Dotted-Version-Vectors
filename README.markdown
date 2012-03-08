@@ -98,7 +98,7 @@ How To Use
 		C2 = dottedvv:increment(id, C),
 		
 		% Get an updated clock in server _Id_, from _arg1_ (client clock) and _arg2_ (server clock)
-		% C3 = {[], {id,2}}
+		% C3 = {[{id,1}], {id,2}}
 		C3 = dottedvv:update(C2, C, id),
 		
 		% Apply _sync_ with result of _update_ and the server clock, to discard all outdated information
