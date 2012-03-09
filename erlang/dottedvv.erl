@@ -114,7 +114,6 @@ descends(_, {}) -> true;
 descends(A, B) -> equal(A,B) orelse descends2(A,B).
 
 descends2({V,{I,{C,TA}}}, {V,{I,{C,TB}}}) -> (TA >= TB);
-descends2({V,{I,{CA,_TA}}}, {V,{I,{CB,_TB}}}) -> (CA > CB);
 descends2({VA,_DA}, {_VB,{IB,{CB,TB}}}) ->
 	case lists:keyfind(IB, 1, VA) of
 		{_, {CA, TA}} ->	
@@ -183,17 +182,15 @@ sync(S1={_,_},S2) -> sync([S1],S2);
 sync(S1,S2={_,_}) -> sync(S1,[S2]);
 sync(Set1, Set2) -> 
 	S = Set1 ++ Set2,
-	SU = [ sets:to_list(sets:from_list(B)) || B <- S],
-	Old = [[S2 || S2 <- SU,
-%%		equal(S1,S2) == false,
+	SS = sets:from_list(S),
+	SL = sets:to_list(SS),
+	Old = [[S2 || S2 <- SL,
+		equal(S1,S2) == false,
  		descends(S1,S2)]
-                || S1 <- SU],
-	%io:format("Old: ~p~n", [Old]),
+                || S1 <- SL],
     Old2 = lists:flatten(Old),
     VOld = sets:from_list(Old2),
-    VS = sets:from_list(SU),
-	%io:format("Old2: ~p~n", [Old2]),
-    VRes = sets:subtract(VS, VOld),
+    VRes = sets:subtract(SS, VOld),
 	sets:to_list(VRes).
 
 
@@ -324,7 +321,7 @@ example_test() ->
     A2 = increment(a, A1),
     C = merge([A2, B1]),
     C1 = increment(c, C),
-	%io:format("C1 ~p  A2 ~p \n",[C1,A2]),
+	%io:format("~nC1 ~p~nA2 ~p~n",[C1,A2]),
     true = descends(C1, A2),
     true = descends(C1, B1),
     false = descends(B1, C1),
@@ -350,17 +347,22 @@ descends_test() ->
 	false = descends(C1, C5),
     C6 = increment(b, C5),
     C7 = increment(a, C6),
-    C8 = increment(b, C7),
-	true = descends(C8, C3),
-	true = descends(C8, C5),
-	true = descends(C8, C6),
-	true = descends(C8, C7),
-	true = descends(C8, C8),
-	false = descends(C1, C8),
-	false = descends(C4, C8),
-	false = descends(C5, C8),
-	false = descends(C6, C8),
-	false = descends(C7, C8),
+    C8a = increment(b, C7),
+    C8b = update(C7, C8a, b),
+	true = descends(C8a, C3),
+	true = descends(C8b, C5),
+	true = descends(C8a, C6),
+	true = descends(C8b, C7),
+	true = descends(C8a, C8a),
+	true = descends(C8b, C8b),
+	io:format("~nCa ~p~nCb ~p~n",[C8a,C8b]),
+	false = descends(C8a, C8b),
+	false = descends(C8b, C8a),
+	false = descends(C1, C8a),
+	false = descends(C4, C8b),
+	false = descends(C5, C8a),
+	false = descends(C6, C8b),
+	false = descends(C7, C8a),
 	ok.
 
 accessor_test() ->
@@ -420,6 +422,26 @@ merge_same_id_test() ->
 %% TODO
 
 
+sync_test() ->
+	C1 = {[], {a,{1,1}}},
+	C2 = {[], {a,{1,2}}},
+    C3 = increment(a, C2),
+    C4 = increment(a, C3),
+    C5 = increment(a, C4),
+    C6 = increment(b, C5),
+    C7 = increment(a, C6),
+    C8a = increment(b, C7),
+    C8b = update(C7, C8a, b),
+	io:format("~nC1 ~p~nC2 ~p~n",[C1,C2]),
+	[C2] = sync(C1, C2),
+	[C4] = sync(C3, C4),
+	[C6] = sync(C3, C6),
+	[C7] = sync(C6, C7),
+	[C7] = sync(C7, C7),
+	[C8a] = sync(C7, C8a),
+	[C8b] = sync(C7, C8b),
+	[C8a,C8b] = sync(C8a, C8b),
+	ok.
 
 
 
