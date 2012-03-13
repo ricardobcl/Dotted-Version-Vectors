@@ -3,9 +3,9 @@
 %%
 %% File:      dottedvv.erl
 %%
-%% @author    Ricardo Gonçalves <tome.wave@gmail.com>
+%% @author    Ricardo Tomé Gonçalves <tome.wave@gmail.com>
 %%
-%% @copyright 2011 Ricardo Gonçalves 
+%% @copyright 2012 Ricardo Tomé Gonçalves 
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -33,7 +33,7 @@
 
 -module(dottedvv).
 
--author('Ricardo Goncalves <tome@di.uminho.pt>').
+-author('Ricardo Tome Goncalves <tome@di.uminho.pt>').
 
 -export([fresh/0,descends/2,sync/2,update/3,equal/2,increment/2,merge/1]).
 
@@ -89,7 +89,7 @@ update(Sc, Sr, Id) when is_list(Sc) -> update(merge(Sc), Sr, Id);
 update(Sc, Sr, Id) when is_list(Sr) -> update(Sc, merge(Sr), Id);
 update(Sc, Sr, Id) ->
 	{MaxC, _TS} = max_counter(Id, Sc),
-	{MaxR, _TS} = max_counter(Id, Sr),
+	{MaxR, _TS2} = max_counter(Id, Sr),
 	Max = max(MaxC, MaxR),
 	V = [{Id2, max_counter(Id2, Sc)} || Id2 <- ids(Sc)],
 	Dot = {Id, {Max + 1 , new_timestamp()}},
@@ -191,7 +191,7 @@ sync(Set1, Set2) ->
     Old2 = lists:flatten(Old),
     VOld = sets:from_list(Old2),
     VRes = sets:subtract(SS, VOld),
-	sets:to_list(VRes).
+	lists:sort(sets:to_list(VRes)).
 
 
 
@@ -321,12 +321,50 @@ example_test() ->
     A2 = increment(a, A1),
     C = merge([A2, B1]),
     C1 = increment(c, C),
-	%io:format("~nC1 ~p~nA2 ~p~n",[C1,A2]),
     true = descends(C1, A2),
     true = descends(C1, B1),
     false = descends(B1, C1),
     false = descends(B1, A1),
     ok.
+
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% doc Unit Tests for UPDATE
+
+%% NOTE: increment(id,X) = update(X,X,id)
+update_test() ->
+	C0 = fresh(),
+	C1 = increment(a, C0),
+	{[], {a,{1,_}}} = C1, 
+    C2 = increment(a, C1),
+    {[{a,{1,_}}], {a,{2,_}}} = C2,
+    C3 = increment(a, C2),
+    {[{a,{2,_}}], {a,{3,_}}} = C3,
+    C7 = increment(a, C3),
+    {[{a,{3,_}}], {a,{4,_}}} = C7,
+    C8a = increment(b, C7),
+    {[{a,{4,_}}], {b,{1,_}}} = C8a,
+    C8b = update(C7, C8a, b),
+    {[{a,{4,_}}], {b,{2,_}}} = C8b,
+    C8c = update(C7, [C8a, C8b], b),
+    {[{a,{4,_}}], {b,{3,_}}} = C8c,
+    C8d = update(C7, [C8a, C8b, C8c], b),
+    {[{a,{4,_}}], {b,{4,_}}} = C8d,
+    C7a = update(C7, [C8a, C8b, C8c, C8d], a),
+    {[{a,{4,_}}], {a,{5,_}}} = C7a,
+    C8e = update(C7a, [C8a, C8b, C8c, C8d], b),
+    {[{a,{5,_}}], {b,{5,_}}} = C8e,
+    C8f = update(C8e, [C8a, C8b, C8c, C8d], b),
+    {[{a,{5,_}},{b,{5,_}}], {b,{6,_}}} = C8f,
+    C9 = update(C8f, [C8a, C8b, C8c, C8d, C8f], a),
+	{[{a,{5,_}},{b,{6,_}}], {a,{6,_}}} = C9, 
+	ok.
+
+
+
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % doc Unit Tests for DESCENDS
@@ -376,11 +414,12 @@ accessor_test() ->
     ?assertEqual([<<"1">>, <<"2">>], lists:sort(ids(C))).
 
 
-%% TODO: MORE TESTS
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % doc Unit Tests for MERGE
+
+
 merge_test() ->
     C1 = {[{<<"1">>, {1, 1}},
            {<<"2">>, {2, 2}}],
@@ -416,10 +455,10 @@ merge_same_id_test() ->
 
 
 
+
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % doc Unit Tests for SYNC
-
-%% TODO
 
 
 sync_test() ->
@@ -432,7 +471,9 @@ sync_test() ->
     C7 = increment(a, C6),
     C8a = increment(b, C7),
     C8b = update(C7, C8a, b),
-	io:format("~nC1 ~p~nC2 ~p~n",[C1,C2]),
+    C8c = update(C7, [C8a, C8b], b),
+    C8d = update(C7, [C8a, C8b, C8c], a),
+    C9 = update([C8a, C8b, C8c, C8d], [C8a, C8b, C8c, C8d], c),
 	[C2] = sync(C1, C2),
 	[C4] = sync(C3, C4),
 	[C6] = sync(C3, C6),
@@ -440,16 +481,12 @@ sync_test() ->
 	[C7] = sync(C7, C7),
 	[C8a] = sync(C7, C8a),
 	[C8b] = sync(C7, C8b),
+	[C8c] = sync(C7, C8c),
 	[C8a,C8b] = sync(C8a, C8b),
+	[C8a,C8b,C8c] = sync(C8c, [C8a,C8b]),
+	[C8d,C8a,C8b,C8c] = sync(C8d, [C8a,C8b,C8c]),
+	[C9] = sync(C9, [C8a,C8b,C8c,C8d]),
 	ok.
-
-
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% doc Unit Tests for UPDATE
-
-%% TODO
-
 
 
 
@@ -458,6 +495,23 @@ sync_test() ->
 
 %% TODO
 
+equal_test() ->
+	C1 = {[], {a,{1,1}}},
+	C2 = {[], {a,{1,2}}},
+    C3 = increment(a, C2),
+    C4 = increment(a, C3),
+    C5 = increment(b, C4),
+    C6 = increment(b, C5),
+    C6b = increment(b, C5),
+	false = equal(C1,C2),
+	true = equal(C1,C1),
+	false = equal(C2,C1),
+	false = equal(C3,C2),
+	false = equal(C4,C3),
+	false = equal(C5,C4),
+	false = equal(C6,C5),
+	true = equal(C6,C6b),
+	ok.
 
 
 
