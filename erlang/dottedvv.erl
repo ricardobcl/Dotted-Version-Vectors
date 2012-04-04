@@ -35,7 +35,7 @@
 
 -author('Ricardo Tome Goncalves <tome@di.uminho.pt>').
 
--export([fresh/0,descends/2,sync/2,update/3,equal/2,increment/2,merge/1]).
+-export([fresh/0,descends/2,sync/1,update/3,equal/2,increment/2,merge/1]).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -173,25 +173,23 @@ merge_dot({S, {Id, C}}) -> {lists:keystore(Id, 1, S, {Id, C}), null}.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%% sync(S1,S2) -> S
-% @doc  Takes two clock sets and returns a clock set. 
+%%%%%%%%%%%%%%%%%%%% sync(S) -> S
+% @doc  Takes a set of clocks and returns another set of clocks. 
 %		It returns a set of concurrent clocks, 
 %		each belonging to one of the sets, and that 
 %		together cover both sets while discarding obsolete knowledge.
--spec sync([dottedvv()], [dottedvv()]) -> [dottedvv()].
-sync(S1={_,_},S2) -> sync([S1],S2);
-sync(S1,S2={_,_}) -> sync(S1,[S2]);
-sync(Set1, Set2) -> 
-	S = Set1 ++ Set2,
-	SS = sets:from_list(S),
-	SL = sets:to_list(SS),
-	Old = [[S2 || S2 <- SL,
+-spec sync([dottedvv()]) -> [dottedvv()].
+sync(S={_,_}) -> sync([S]);
+sync(S) -> 
+	Sset = sets:from_list(S),
+	Slist = sets:to_list(Sset),
+	Old = [[S2 || S2 <- Slist,
 		equal(S1,S2) == false,
  		descends(S1,S2)]
-                || S1 <- SL],
+                || S1 <- Slist],
     Old2 = lists:flatten(Old),
     VOld = sets:from_list(Old2),
-    VRes = sets:subtract(SS, VOld),
+    VRes = sets:subtract(Sset, VOld),
 	lists:sort(sets:to_list(VRes)).
 
 
@@ -475,18 +473,18 @@ sync_test() ->
     C8c = update(C7, [C8a, C8b], b),
     C8d = update(C7, [C8a, C8b, C8c], a),
     C9 = update([C8a, C8b, C8c, C8d], [C8a, C8b, C8c, C8d], c),
-	[C2] = sync(C1, C2),
-	[C4] = sync(C3, C4),
-	[C6] = sync(C3, C6),
-	[C7] = sync(C6, C7),
-	[C7] = sync(C7, C7),
-	[C8a] = sync(C7, C8a),
-	[C8b] = sync(C7, C8b),
-	[C8c] = sync(C7, C8c),
-	[C8a,C8b] = sync(C8a, C8b),
-	[C8a,C8b,C8c] = sync(C8c, [C8a,C8b]),
-	[C8d,C8a,C8b,C8c] = sync(C8d, [C8a,C8b,C8c]),
-	[C9] = sync(C9, [C8a,C8b,C8c,C8d]),
+	[C2] = sync([C1, C2]),
+	[C4] = sync([C3, C4]),
+	[C6] = sync([C3, C6]),
+	[C7] = sync([C6, C7]),
+	[C7] = sync([C7, C7]),
+	[C8a] = sync([C7, C8a]),
+	[C8b] = sync([C7, C8b]),
+	[C8c] = sync([C7, C8c]),
+	[C8a,C8b] = sync([C8a, C8b]),
+	[C8a,C8b,C8c] = sync([C8c, C8a,C8b]),
+	[C8d,C8a,C8b,C8c] = sync([C8d,C8a,C8b,C8c]),
+	[C9] = sync([C9,C8a,C8b,C8c,C8d]),
 	ok.
 
 
