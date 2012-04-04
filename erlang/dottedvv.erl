@@ -130,6 +130,7 @@ descends2({VA,_DA}, {_VB,{IB,{CB,TB}}}) ->
 -spec merge([dottedvv()]) -> dottedvv() | {}.
 merge([]) -> {};
 merge({}) -> {};
+merge([{}|S]) -> merge(S);
 merge(S={_,_}) -> merge_dot(S);
 merge([S={_,_}]) -> merge_dot(S);
 merge([First|Rest]) -> merge(Rest, sort_and_merge_dot(First)).
