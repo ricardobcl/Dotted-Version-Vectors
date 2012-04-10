@@ -22,7 +22,7 @@
 %% under the License.
 %%
 %% @doc  
-%%	A simple Erlang implementation of Dotted Version Vectors.
+%%  A simple Erlang implementation of Dotted Version Vectors.
 %%  Some functions were adapted from the vclock.erl file (for Version Vectors) of Basho's Riak.
 %% @end  
 %%
@@ -88,40 +88,58 @@ fresh() -> {}.
 update(Sc, Sr, Id) when is_list(Sc) -> update(merge(Sc), Sr, Id);
 update(Sc, Sr, Id) when is_list(Sr) -> update(Sc, merge(Sr), Id);
 update(Sc, Sr, Id) ->
-	{MaxC, _TS} = max_counter(Id, Sc),
-	{MaxR, _TS2} = max_counter(Id, Sr),
-	Max = max(MaxC, MaxR),
-	V = [{Id2, max_counter(Id2, Sc)} || Id2 <- ids(Sc)],
-	Dot = {Id, {Max + 1 , new_timestamp()}},
-	{V, Dot}.
-	
+    {MaxC, _TS} = max_counter(Id, Sc),
+    {MaxR, _TS2} = max_counter(Id, Sr),
+    Max = max(MaxC, MaxR),
+    V = [{Id2, max_counter(Id2, Sc)} || Id2 <- ids(Sc)],
+    Dot = {Id, {Max + 1 , new_timestamp()}},
+    {V, Dot}.
+    
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % @doc Increment DottedVV at Node.
 -spec increment(id(), dottedvv()) -> dottedvv().
 increment(Id, C) ->
-	update(C, C, Id).
+    update(C, C, Id).
 
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % @doc Return true if Va is a direct descendant of Vb, else false -- remember, a dottedvv is its own descendant!
 -spec descends(dottedvv(), dottedvv()) -> boolean().
-			
+            
  % all clocks descend from the empty clock
 descends(_, {}) -> true;
-descends(A, B) -> equal(A,B) orelse descends2(A,B).
+descends(A, B) -> 
+    equal(A,B) orelse descends2(A, B).
 
+ % test if both have a valid dot to compare
 descends2({V,{I,{C,TA}}}, {V,{I,{C,TB}}}) -> (TA >= TB);
 descends2({VA,_DA}, {_VB,{IB,{CB,TB}}}) ->
-	case lists:keyfind(IB, 1, VA) of
-		{_, {CA, TA}} ->	
-			(CA > CB) orelse ((CA =:= CB) and (TA >= TB));
-		false -> false %% they are not equal, as it was tested in descends
-    end.
+    case lists:keyfind(IB, 1, VA) of
+        {_, {CA, TA}} ->    
+            (CA > CB) orelse ((CA =:= CB) and (TA >= TB));
+        false -> false %% they are not equal, as it was tested in descends
+    end;
+descends2(A, B) -> 
+    {VA, null} = merge(A),
+    {VB, null} = merge(B),
+    descends3(VA, VB).
 
-			
+descends3(A, A) -> true;
+descends3(_, []) -> true;
+descends3(Va, Vb) ->
+    [{NodeB, {CtrB, _T}}|RestB] = Vb,
+    case lists:keyfind(NodeB, 1, Va) of
+        false ->
+            false;
+        {_, {CtrA, _TSA}} ->
+            (CtrA >= CtrB) andalso descends3(Va,RestB)
+        end.
+
+
+            
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -133,7 +151,9 @@ merge({}) -> {};
 merge([{}|S]) -> merge(S);
 merge(S={_,_}) -> merge_dot(S);
 merge([S={_,_}]) -> merge_dot(S);
-merge([First|Rest]) -> merge(Rest, sort_and_merge_dot(First)).
+merge(S) -> 
+    [First|Rest] = lists:flatten(S),
+    merge(Rest, sort_and_merge_dot(First)).
 
 merge([], NClock) -> {NClock, null};
 merge([AClock|VClocks], NClock) ->
@@ -160,9 +180,9 @@ merge(V=[{Node1,{Ctr1,TS1}=CT1}=NCT1|VClock],
 
 %% AUX
 sort_and_merge_dot(S) -> 
-	{S2, null} = merge_dot(S),
-	lists:keysort(1, S2).
-	
+    {S2, null} = merge_dot(S),
+    lists:keysort(1, S2).
+    
 
 %% AUX 2
 merge_dot({S, null}) -> {S, null};
@@ -175,22 +195,22 @@ merge_dot({S, {Id, C}}) -> {lists:keystore(Id, 1, S, {Id, C}), null}.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%% sync(S) -> S
 % @doc  Takes a set of clocks and returns another set of clocks. 
-%		It returns a set of concurrent clocks, 
-%		each belonging to one of the sets, and that 
-%		together cover both sets while discarding obsolete knowledge.
+%       It returns a set of concurrent clocks, 
+%       each belonging to one of the sets, and that 
+%       together cover both sets while discarding obsolete knowledge.
 -spec sync([dottedvv()]) -> [dottedvv()].
 sync(S={_,_}) -> sync([S]);
 sync(S) -> 
-	Sset = sets:from_list(S),
-	Slist = sets:to_list(Sset),
-	Old = [[S2 || S2 <- Slist,
-		equal(S1,S2) == false,
- 		descends(S1,S2)]
+    Sset = sets:from_list(S),
+    Slist = sets:to_list(Sset),
+    Old = [[S2 || S2 <- Slist,
+        equal(S1,S2) == false,
+        descends(S1,S2)]
                 || S1 <- Slist],
     Old2 = lists:flatten(Old),
     VOld = sets:from_list(Old2),
     VRes = sets:subtract(Sset, VOld),
-	lists:sort(sets:to_list(VRes)).
+    lists:sort(sets:to_list(VRes)).
 
 
 
@@ -199,13 +219,6 @@ sync(S) ->
 
 
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%% ids(X) -> [id]
 % @doc Return the list of all nodes that have ever incremented dottedvv.
@@ -239,8 +252,8 @@ get_counter(_, {}) -> {0,0};
 get_counter(Id, {_, {Id, C}}) -> C;
 get_counter(Id, {S, _}) ->
     case lists:keyfind(Id, 1, S) of
-		{_, CT} -> CT;
-		false -> {0,0}
+        {_, CT} -> CT;
+        false -> {0,0}
     end.
 
 
@@ -252,8 +265,8 @@ get_timestamp(_, {}) -> undefined;
 get_timestamp(Id, {_,{Id,{_,TS}}}) -> TS;
 get_timestamp(Id, {S,_}) ->
     case lists:keyfind(Id, 1, S) of
-		{_, {_, TS}} -> TS;
-		false -> undefined
+        {_, {_, TS}} -> TS;
+        false -> undefined
     end.
 
 
@@ -261,8 +274,8 @@ get_timestamp(Id, {S,_}) ->
 
 -define(DAYS_FROM_GREGORIAN_BASE_TO_EPOCH, (1970*365+478)).
 -define(SECONDS_FROM_GREGORIAN_BASE_TO_EPOCH,
-	(?DAYS_FROM_GREGORIAN_BASE_TO_EPOCH * 24*60*60)
-	%% == calendar:datetime_to_gregorian_seconds({{1970,1,1},{0,0,0}})
+    (?DAYS_FROM_GREGORIAN_BASE_TO_EPOCH * 24*60*60)
+    %% == calendar:datetime_to_gregorian_seconds({{1970,1,1},{0,0,0}})
        ).
 
 % @doc Return a timestamp for a dotted vector clock
@@ -280,21 +293,24 @@ new_timestamp() ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % @doc Compares two dottedvvs for equality.
 -spec equal(Dottedvv :: [dottedvv()], Dottedvv :: [dottedvv()]) -> boolean().
+equal([], B) -> equal({}, B);
+equal(A, []) -> equal(A, {});
 equal({}, {}) -> true;
 equal({}, _) -> false;
 equal(_, {}) -> false;
 equal({SA,DA}, {SB,DB}) -> DA =:= DB andalso lists:sort(SA) =:= lists:sort(SB);
 equal([_], {_,_}) -> false;
 equal({_,_}, [_]) -> false;
-equal(A, B) -> contains(A, B) andalso contains(B, A).
+equal(A, B) -> 
+    contains(A, B) andalso contains(B, A).
 
 
-contains([], []) -> true;
+contains([], _) -> true;
 contains({_,_}, []) -> false;
 contains(A={_,_}, [H|T]) -> equal(A,H) orelse contains(A, T);
 contains([H|T], B) -> contains(H,B) andalso contains(T,B).
 
-	
+    
 
 
 
@@ -334,9 +350,9 @@ example_test() ->
 
 %% NOTE: increment(id,X) = update(X,X,id)
 update_test() ->
-	C0 = fresh(),
-	C1 = increment(a, C0),
-	{[], {a,{1,_}}} = C1, 
+    C0 = fresh(),
+    C1 = increment(a, C0),
+    {[], {a,{1,_}}} = C1, 
     C2 = increment(a, C1),
     {[{a,{1,_}}], {a,{2,_}}} = C2,
     C3 = increment(a, C2),
@@ -358,8 +374,8 @@ update_test() ->
     C8f = update(C8e, [C8a, C8b, C8c, C8d], b),
     {[{a,{5,_}},{b,{5,_}}], {b,{6,_}}} = C8f,
     C9 = update(C8f, [C8a, C8b, C8c, C8d, C8f], a),
-	{[{a,{5,_}},{b,{6,_}}], {a,{6,_}}} = C9, 
-	ok.
+    {[{a,{5,_}},{b,{6,_}}], {a,{6,_}}} = C9, 
+    ok.
 
 
 
@@ -369,38 +385,38 @@ update_test() ->
 % doc Unit Tests for DESCENDS
 
 descends_test() ->
-	C1 = {[], {a,{1,1}}},
-	C2 = {[], {a,{1,2}}},
-	false = equal(C1, C2),
-	false = descends(C1, C2),
-	true = descends(C2, C1),
+    C1 = {[], {a,{1,1}}},
+    C2 = {[], {a,{1,2}}},
+    false = equal(C1, C2),
+    false = descends(C1, C2),
+    true = descends(C2, C1),
     C3 = increment(a, C2),
     C4 = increment(a, C3),
     C5 = increment(a, C4),
-	true = descends(C5, C3),
-	true = descends(C5, C4),
-	true = descends(C5, C5),
-	false = descends(C4, C5),
-	false = descends(C1, C5),
+    true = descends(C5, C3),
+    true = descends(C5, C4),
+    true = descends(C5, C5),
+    false = descends(C4, C5),
+    false = descends(C1, C5),
     C6 = increment(b, C5),
     C7 = increment(a, C6),
     C8a = increment(b, C7),
     C8b = update(C7, C8a, b),
-	true = descends(C8a, C3),
-	true = descends(C8b, C5),
-	true = descends(C8a, C6),
-	true = descends(C8b, C7),
-	true = descends(C8a, C8a),
-	true = descends(C8b, C8b),
-	io:format("~nCa ~p~nCb ~p~n",[C8a,C8b]),
-	false = descends(C8a, C8b),
-	false = descends(C8b, C8a),
-	false = descends(C1, C8a),
-	false = descends(C4, C8b),
-	false = descends(C5, C8a),
-	false = descends(C6, C8b),
-	false = descends(C7, C8a),
-	ok.
+    true = descends(C8a, C3),
+    true = descends(C8b, C5),
+    true = descends(C8a, C6),
+    true = descends(C8b, C7),
+    true = descends(C8a, C8a),
+    true = descends(C8b, C8b),
+%   io:format("~nCa ~p~nCb ~p~n",[C8a,C8b]),
+    false = descends(C8a, C8b),
+    false = descends(C8b, C8a),
+    false = descends(C1, C8a),
+    false = descends(C4, C8b),
+    false = descends(C5, C8a),
+    false = descends(C6, C8b),
+    false = descends(C7, C8a),
+    ok.
 
 accessor_test() ->
     C = {[{<<"1">>,{1,1}}], {<<"2">>,{2,2}}},
@@ -422,7 +438,7 @@ accessor_test() ->
 merge_test() ->
     C1 = {[{<<"1">>, {1, 1}},
            {<<"2">>, {2, 2}}],
-			{<<"4">>, {4, 4}}},
+            {<<"4">>, {4, 4}}},
     C2 = {[{<<"3">>, {3, 3}}],
            {<<"4">>, {3, 3}}},
     ?assertEqual({}, merge(fresh())),
@@ -461,8 +477,8 @@ merge_same_id_test() ->
 
 
 sync_test() ->
-	C1 = {[], {a,{1,1}}},
-	C2 = {[], {a,{1,2}}},
+    C1 = {[], {a,{1,1}}},
+    C2 = {[], {a,{1,2}}},
     C3 = increment(a, C2),
     C4 = increment(a, C3),
     C5 = increment(a, C4),
@@ -473,19 +489,19 @@ sync_test() ->
     C8c = update(C7, [C8a, C8b], b),
     C8d = update(C7, [C8a, C8b, C8c], a),
     C9 = update([C8a, C8b, C8c, C8d], [C8a, C8b, C8c, C8d], c),
-	[C2] = sync([C1, C2]),
-	[C4] = sync([C3, C4]),
-	[C6] = sync([C3, C6]),
-	[C7] = sync([C6, C7]),
-	[C7] = sync([C7, C7]),
-	[C8a] = sync([C7, C8a]),
-	[C8b] = sync([C7, C8b]),
-	[C8c] = sync([C7, C8c]),
-	[C8a,C8b] = sync([C8a, C8b]),
-	[C8a,C8b,C8c] = sync([C8c, C8a,C8b]),
-	[C8d,C8a,C8b,C8c] = sync([C8d,C8a,C8b,C8c]),
-	[C9] = sync([C9,C8a,C8b,C8c,C8d]),
-	ok.
+    [C2] = sync([C1, C2]),
+    [C4] = sync([C3, C4]),
+    [C6] = sync([C3, C6]),
+    [C7] = sync([C6, C7]),
+    [C7] = sync([C7, C7]),
+    [C8a] = sync([C7, C8a]),
+    [C8b] = sync([C7, C8b]),
+    [C8c] = sync([C7, C8c]),
+    [C8a,C8b] = sync([C8a, C8b]),
+    [C8a,C8b,C8c] = sync([C8c, C8a,C8b]),
+    [C8d,C8a,C8b,C8c] = sync([C8d,C8a,C8b,C8c]),
+    [C9] = sync([C9,C8a,C8b,C8c,C8d]),
+    ok.
 
 
 
@@ -495,22 +511,22 @@ sync_test() ->
 %% TODO
 
 equal_test() ->
-	C1 = {[], {a,{1,1}}},
-	C2 = {[], {a,{1,2}}},
+    C1 = {[], {a,{1,1}}},
+    C2 = {[], {a,{1,2}}},
     C3 = increment(a, C2),
     C4 = increment(a, C3),
     C5 = increment(b, C4),
     C6 = increment(b, C5),
     C6b = increment(b, C5),
-	false = equal(C1,C2),
-	true = equal(C1,C1),
-	false = equal(C2,C1),
-	false = equal(C3,C2),
-	false = equal(C4,C3),
-	false = equal(C5,C4),
-	false = equal(C6,C5),
-	true = equal(C6,C6b),
-	ok.
+    false = equal(C1,C2),
+    true = equal(C1,C1),
+    false = equal(C2,C1),
+    false = equal(C3,C2),
+    false = equal(C4,C3),
+    false = equal(C5,C4),
+    false = equal(C6,C5),
+    true = equal(C6,C6b),
+    ok.
 
 
 
