@@ -110,7 +110,10 @@ increment(Id, C) ->
 -spec descends(dottedvv(), dottedvv()) -> boolean().
             
  % all clocks descend from the empty clock
+descends(_, [{}]) -> true;
+descends([{}], _) -> false;
 descends(_, {}) -> true;
+descends({}, _) -> false;
 descends(A, B) -> 
     equal(A,B) orelse descends2(A, B).
 
@@ -199,6 +202,8 @@ merge_dot({S, {Id, C}}) -> {lists:keystore(Id, 1, S, {Id, C}), null}.
 %       each belonging to one of the sets, and that 
 %       together cover both sets while discarding obsolete knowledge.
 -spec sync([dottedvv()]) -> [dottedvv()].
+sync({}) -> [];
+sync([]) -> [];
 sync(S={_,_}) -> sync([S]);
 sync(S) -> 
     Sset = sets:from_list(S),
@@ -295,6 +300,8 @@ new_timestamp() ->
 -spec equal(Dottedvv :: [dottedvv()], Dottedvv :: [dottedvv()]) -> boolean().
 equal([], B) -> equal({}, B);
 equal(A, []) -> equal(A, {});
+equal([A], B) -> equal(A, B);
+equal(A, [B]) -> equal(A, B);
 equal({}, {}) -> true;
 equal({}, _) -> false;
 equal(_, {}) -> false;
@@ -307,10 +314,11 @@ equal(A, B) ->
 
 contains([], _) -> true;
 contains({_,_}, []) -> false;
+contains({SA,DA}, {SB,DB}) -> DA =:= DB andalso lists:sort(SA) =:= lists:sort(SB);
 contains(A={_,_}, [H|T]) -> equal(A,H) orelse contains(A, T);
 contains([H|T], B) -> contains(H,B) andalso contains(T,B).
 
-    
+
 
 
 
