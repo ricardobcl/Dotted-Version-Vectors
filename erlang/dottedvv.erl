@@ -35,7 +35,7 @@
 
 -author('Ricardo Tome Goncalves <tome@di.uminho.pt>').
 
--export([fresh/0,descends/2,sync/1,update/3,equal/2,increment/2,merge/1]).
+-export([fresh/0,strict_descends/2,descends/2,sync/2,update/3,equal/2,increment/2,merge/1]).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -85,15 +85,15 @@ fresh() -> {}.
 % Id = Id that will be incremented (Replica id)
 -spec update(Sc :: [dottedvv()], Sr :: [dottedvv()], IDr :: id()) -> dottedvv().
 
-update(Sc, Sr, Id) when is_list(Sc) -> update(merge(Sc), Sr, Id);
-update(Sc, Sr, Id) when is_list(Sr) -> update(Sc, merge(Sr), Id);
-update(Sc, Sr, Id) ->
+update(Sc, Sr, Id) -> update2(merge(Sc), merge(Sr), Id).
+update2({}, {}, Id) -> {[], {Id, {1 , new_timestamp()}}};
+update2(Sc, Sr, Id) ->
+    {Sc2, null} = Sc,
     {MaxC, _TS} = max_counter(Id, Sc),
     {MaxR, _TS2} = max_counter(Id, Sr),
     Max = max(MaxC, MaxR),
-    V = [{Id2, max_counter(Id2, Sc)} || Id2 <- ids(Sc)],
     Dot = {Id, {Max + 1 , new_timestamp()}},
-    {V, Dot}.
+    {Sc2, Dot}.
     
 
 
@@ -105,25 +105,29 @@ increment(Id, C) ->
 
 
 
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% @doc Return true if Va is a direct descendant of Vb, else false -- remember, a dottedvv is its own descendant!
+% @doc Return true if Va is a direct descendant of Vb, else false --> S1 >= S2
 -spec descends(dottedvv(), dottedvv()) -> boolean().
-            
- % all clocks descend from the empty clock
-descends(_, [{}]) -> true;
-descends([{}], _) -> false;
-descends(_, {}) -> true;
-descends({}, _) -> false;
-descends(A, B) -> 
-    equal(A,B) orelse descends2(A, B).
+descends(A, B) -> equal(A, B) orelse strict_descends(A, B).
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% @doc Return true if Va is a direct descendant of Vb, else false --> S1 > S2
+-spec strict_descends(dottedvv(), dottedvv()) -> boolean().
+strict_descends([{}], _) -> false;
+strict_descends({}, _) -> false;
+strict_descends(_, [{}]) -> true;
+strict_descends(_, {}) -> true;
+strict_descends(A, B) -> (equal(A, B) == false) andalso descends2(A, B).
 
  % test if both have a valid dot to compare
-descends2({V,{I,{C,TA}}}, {V,{I,{C,TB}}}) -> (TA >= TB);
-descends2({VA,_DA}, {_VB,{IB,{CB,TB}}}) ->
+descends2({V,{I,{C,TA}}}, {V,{I,{C,TB}}}) -> (TA > TB);
+descends2({VA,_DA}, {_VB,{IB,{CB,_TB}}}) ->
     case lists:keyfind(IB, 1, VA) of
-        {_, {CA, TA}} ->    
-            (CA > CB) orelse ((CA =:= CB) and (TA >= TB));
-        false -> false %% they are not equal, as it was tested in descends
+        {_, {CA, _TA}} ->    
+            (CA >= CB); % orelse ((CA =:= CB) and (TA > TB));
+        false -> false %% they are not equal, as it was tested in strict_descends
     end;
 descends2(A, B) -> 
     {VA, null} = merge(A),
@@ -196,31 +200,19 @@ merge_dot({S, {Id, C}}) -> {lists:keystore(Id, 1, S, {Id, C}), null}.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%% sync(S) -> S
-% @doc  Takes a set of clocks and returns another set of clocks. 
+%%%%%%%%%%%%%%%%%%%% sync(S, {u}) -> S
+% @doc  Takes two clock sets and returns a clock set. 
 %       It returns a set of concurrent clocks, 
 %       each belonging to one of the sets, and that 
 %       together cover both sets while discarding obsolete knowledge.
--spec sync([dottedvv()]) -> [dottedvv()].
-sync({}) -> [];
-sync([]) -> [];
-sync(S={_,_}) -> sync([S]);
-sync(S) -> 
-    Sset = sets:from_list(S),
-    Slist = sets:to_list(Sset),
-    Old = [[S2 || S2 <- Slist,
-        equal(S1,S2) == false,
-        descends(S1,S2)]
-                || S1 <- Slist],
-    Old2 = lists:flatten(Old),
-    VOld = sets:from_list(Old2),
-    VRes = sets:subtract(Sset, VOld),
-    lists:sort(sets:to_list(VRes)).
-
-
-
-
-
+-spec sync([dottedvv()], [dottedvv()]) -> [dottedvv()].
+sync({}, S) -> S;
+sync(S, {}) -> S;
+sync(S1={_,_}, S2) -> sync([S1], S2);
+sync(S1, S2) when is_list(S2) -> [C] = S2, sync(S1, C);
+sync(S, C={_,_}) -> 
+    NewS = [C2 || C2 <- S, descends(C,C2)==false],
+    NewS ++ [C].
 
 
 
@@ -338,16 +330,18 @@ example_test() ->
     B = fresh(),
     A1 = increment(a, A),
     B1 = increment(b, B),
-    true = descends(A1,A),
-    true = descends(B1,B),
-    false = descends(A1,B1),
+    true = strict_descends(A1,A),
+    true = strict_descends(B1,B),
+    false = strict_descends(A1,B1),
     A2 = increment(a, A1),
     C = merge([A2, B1]),
     C1 = increment(c, C),
-    true = descends(C1, A2),
-    true = descends(C1, B1),
-    false = descends(B1, C1),
-    false = descends(B1, A1),
+%   io:format("~nC1 ~p~nA2 ~p~n",[C1,A2]),
+    false = equal(C1, A2),
+    true = strict_descends(C1, A2),
+    true = strict_descends(C1, B1),
+    false = strict_descends(B1, C1),
+    false = strict_descends(B1, A1),
     ok.
 
 
@@ -396,34 +390,37 @@ descends_test() ->
     C1 = {[], {a,{1,1}}},
     C2 = {[], {a,{1,2}}},
     false = equal(C1, C2),
-    false = descends(C1, C2),
-    true = descends(C2, C1),
+    false = strict_descends(C1, C2),
+    true = strict_descends(C2, C1),
     C3 = increment(a, C2),
     C4 = increment(a, C3),
     C5 = increment(a, C4),
-    true = descends(C5, C3),
-    true = descends(C5, C4),
+    true = strict_descends(C5, C3),
+    true = strict_descends(C5, C4),
+    false = strict_descends(C5, C5),
     true = descends(C5, C5),
-    false = descends(C4, C5),
-    false = descends(C1, C5),
+    false = strict_descends(C4, C5),
+    false = strict_descends(C1, C5),
     C6 = increment(b, C5),
     C7 = increment(a, C6),
     C8a = increment(b, C7),
     C8b = update(C7, C8a, b),
-    true = descends(C8a, C3),
-    true = descends(C8b, C5),
-    true = descends(C8a, C6),
-    true = descends(C8b, C7),
+    true = strict_descends(C8a, C3),
+    true = strict_descends(C8b, C5),
+    true = strict_descends(C8a, C6),
+    true = strict_descends(C8b, C7),
+    false = strict_descends(C8a, C8a),
     true = descends(C8a, C8a),
+    false = strict_descends(C8b, C8b),
     true = descends(C8b, C8b),
 %   io:format("~nCa ~p~nCb ~p~n",[C8a,C8b]),
-    false = descends(C8a, C8b),
-    false = descends(C8b, C8a),
-    false = descends(C1, C8a),
-    false = descends(C4, C8b),
-    false = descends(C5, C8a),
-    false = descends(C6, C8b),
-    false = descends(C7, C8a),
+    false = strict_descends(C8a, C8b),
+    false = strict_descends(C8b, C8a),
+    false = strict_descends(C1, C8a),
+    false = strict_descends(C4, C8b),
+    false = strict_descends(C5, C8a),
+    false = strict_descends(C6, C8b),
+    false = strict_descends(C7, C8a),
     ok.
 
 accessor_test() ->
@@ -497,18 +494,19 @@ sync_test() ->
     C8c = update(C7, [C8a, C8b], b),
     C8d = update(C7, [C8a, C8b, C8c], a),
     C9 = update([C8a, C8b, C8c, C8d], [C8a, C8b, C8c, C8d], c),
-    [C2] = sync([C1, C2]),
-    [C4] = sync([C3, C4]),
-    [C6] = sync([C3, C6]),
-    [C7] = sync([C6, C7]),
-    [C7] = sync([C7, C7]),
-    [C8a] = sync([C7, C8a]),
-    [C8b] = sync([C7, C8b]),
-    [C8c] = sync([C7, C8c]),
-    [C8a,C8b] = sync([C8a, C8b]),
-    [C8a,C8b,C8c] = sync([C8c, C8a,C8b]),
-    [C8d,C8a,C8b,C8c] = sync([C8d,C8a,C8b,C8c]),
-    [C9] = sync([C9,C8a,C8b,C8c,C8d]),
+    [C2] = sync(C1, C2),
+    [C4] = sync(C3, C4),
+    [C6] = sync(C3, C6),
+    [C7] = sync(C6, C7),
+    [C7] = sync(C7, C7),
+    [C8a] = sync(C7, C8a),
+    [C8b] = sync(C7, C8b),
+    [C8c] = sync(C7, C8c),
+    [C8a,C8b] = sync(C8a, C8b),
+    [C8a,C8b,C8c] = lists:sort(sync([C8c, C8a],C8b)),
+    Res = lists:sort(sync([C8d,C8a,C8b],C8c)),
+    Res = lists:sort([C8a,C8b,C8c,C8d]),
+    [C9] = sync([C8d,C8a,C8b,C8c],C9),
     ok.
 
 
