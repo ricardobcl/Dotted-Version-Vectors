@@ -85,13 +85,11 @@ fresh() -> {}.
 % Id = Id that will be incremented (Replica id)
 -spec update(Sc :: [dottedvv()], Sr :: [dottedvv()], IDr :: id()) -> dottedvv().
 
-update(Sc, Sr, Id) -> update2(merge(Sc), merge(Sr), Id).
+update(Sc, Sr, Id) -> update2(merge(Sc), Sr, Id).
 update2({}, {}, Id) -> {[], {Id, {1 , new_timestamp()}}};
 update2(Sc, Sr, Id) ->
     {Sc2, null} = Sc,
-    {MaxC, _TS} = max_counter(Id, Sc),
-    {MaxR, _TS2} = max_counter(Id, Sr),
-    Max = max(MaxC, MaxR),
+    {Max, _TS2} = max_counter(Id, Sr),
     Dot = {Id, {Max + 1 , new_timestamp()}},
     {Sc2, Dot}.
     
@@ -209,10 +207,19 @@ merge_dot({S, {Id, C}}) -> {lists:keystore(Id, 1, S, {Id, C}), null}.
 sync({}, S) -> S;
 sync(S, {}) -> S;
 sync(S1={_,_}, S2) -> sync([S1], S2);
-sync(S1, S2) when is_list(S2) -> [C] = S2, sync(S1, C);
-sync(S, C={_,_}) -> 
-    NewS = [C2 || C2 <- S, descends(C,C2)==false],
-    NewS ++ [C].
+sync(S1, S2={_,_}) -> sync(S1, [S2]);
+sync(S1, S2) ->
+    New1 = [C1 || C1 <- S1, sync_aux(C1, S2, true)],
+    New2 = [C2 || C2 <- S2, sync_aux(C2, S1, false)],
+    New1 ++ New2.
+
+
+sync_aux(X, L, Equal) ->
+    Maps = case Equal of
+        true -> lists:map(fun(E) -> strict_descends(E, X)==false end, L);
+        false -> lists:map(fun(E) -> descends(E, X)==false end, L)
+    end,
+    lists:foldl(fun(A, B) -> A or B end, false, Maps).
 
 
 
@@ -230,6 +237,9 @@ ids2({S, {Id,_}}) -> [Id] ++ ids2(S);
 ids2({[], _}) -> [];
 ids2({S, _}) -> [X || {X,{_,_}} <- S];
 ids2(S) when is_list(S) -> [X || {X,{_,_}} <- S].
+
+
+
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -336,7 +346,6 @@ example_test() ->
     A2 = increment(a, A1),
     C = merge([A2, B1]),
     C1 = increment(c, C),
-%   io:format("~nC1 ~p~nA2 ~p~n",[C1,A2]),
     false = equal(C1, A2),
     true = strict_descends(C1, A2),
     true = strict_descends(C1, B1),
@@ -373,7 +382,7 @@ update_test() ->
     {[{a,{4,_}}], {a,{5,_}}} = C7a,
     C8e = update(C7a, [C8a, C8b, C8c, C8d], b),
     {[{a,{5,_}}], {b,{5,_}}} = C8e,
-    C8f = update(C8e, [C8a, C8b, C8c, C8d], b),
+    C8f = update(C8e, [C8a, C8b, C8c, C8d, C8e], b),
     {[{a,{5,_}},{b,{5,_}}], {b,{6,_}}} = C8f,
     C9 = update(C8f, [C8a, C8b, C8c, C8d, C8f], a),
     {[{a,{5,_}},{b,{6,_}}], {a,{6,_}}} = C9, 
@@ -502,7 +511,7 @@ sync_test() ->
     [C8a] = sync(C7, C8a),
     [C8b] = sync(C7, C8b),
     [C8c] = sync(C7, C8c),
-    [C8a,C8b] = sync(C8a, C8b),
+    [C8a,C8b] = lists:sort(sync(C8a, C8b)),
     [C8a,C8b,C8c] = lists:sort(sync([C8c, C8a],C8b)),
     Res = lists:sort(sync([C8d,C8a,C8b],C8c)),
     Res = lists:sort([C8a,C8b,C8c,C8d]),
