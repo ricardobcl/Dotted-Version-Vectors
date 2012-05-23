@@ -35,7 +35,7 @@
 
 -author('Ricardo Tome Goncalves <tome@di.uminho.pt>').
 
--export([fresh/0,strict_descends/2,descends/2,sync/2,sync2/2,update/3,equal/2,increment/2,merge/1]).
+-export([fresh/0,strict_descends/2,descends/2,sync/2,update/3,equal/2,increment/2,merge/1]).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -206,35 +206,13 @@ merge_dot({S, {Id, C}}) -> {lists:keystore(Id, 1, S, {Id, C}), null}.
 -spec sync([dottedvv()], [dottedvv()]) -> [dottedvv()].
 sync({}, S) -> S;
 sync(S, {}) -> S;
-sync(S1={_,_}, S2) -> sync([S1], S2);
+sync(S1={_,_}, S2) -> sync(S2, [S1]);
 sync(S1, S2={_,_}) -> sync(S1, [S2]);
 sync(S1, S2) ->
-    New1 = [C1 || C1 <- S1, sync_aux(C1, S2, true)],
-    New2 = [C2 || C2 <- S2, sync_aux(C2, S1, false)],
-    New1 ++ New2.
+    NotLeq = [X || X <- S2, lists:all(fun (Y) -> not descends(Y, X) end, S1)],
+    NotLess = [X || X <- S1, lists:all(fun (Y) -> not strict_descends(Y, X) end, NotLeq)],
+    lists:reverse(NotLeq, NotLess).
 
-
-sync_aux(X, L, Equal) ->
-    Maps = case Equal of
-        true -> lists:map(fun(E) -> strict_descends(E, X)==false end, L);
-        false -> lists:map(fun(E) -> descends(E, X)==false end, L)
-    end,
-    lists:foldl(fun(A, B) -> A or B end, false, Maps).
-
-
-
-
-
-
--spec sync2([dottedvv()], [dottedvv()]) -> [dottedvv()].
-sync2([_, {}], S) -> S;
-sync2(S, [_, {}]) -> S;
-sync2(S1, S2) ->
-    SC1 = lists:map(fun({_,C}) -> C end, S1),
-    SC2 = lists:map(fun({_,C}) -> C end, S2),
-    New1 = [{V1,C1} || {V1,C1} <- S1, sync_aux(C1, SC2, true)],
-    New2 = [{V2,C2} || {V2,C2} <- S2, sync_aux(C2, SC1, false)],
-    New1 ++ New2.
 
 
 
