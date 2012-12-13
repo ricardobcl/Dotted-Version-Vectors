@@ -87,6 +87,10 @@ fresh() -> {}.
 
 update(Sc, Sr, Id) -> update2(merge(Sc), Sr, Id).
 update2({}, {}, Id) -> {[], {Id, {1 , new_timestamp()}}};
+update2({}, Sr, Id) -> 
+    {Max, _TS2} = max_counter(Id, Sr),
+    Dot = {Id, {Max + 1 , new_timestamp()}},
+    {[], Dot};
 update2(Sc, Sr, Id) ->
     {Sc2, null} = Sc,
     {Max, _TS2} = max_counter(Id, Sr),
@@ -367,6 +371,8 @@ update_test() ->
     {[{a,{4,_}}], {b,{1,_}}} = C8a,
     C8b = update(C7, C8a, b),
     {[{a,{4,_}}], {b,{2,_}}} = C8b,
+    C8z = update({}, C8a, b),
+    {[], {b,{2,_}}} = C8z,
     C8c = update(C7, [C8a, C8b], b),
     {[{a,{4,_}}], {b,{3,_}}} = C8c,
     C8d = update(C7, [C8a, C8b, C8c], b),
