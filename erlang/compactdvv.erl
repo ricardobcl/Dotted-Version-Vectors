@@ -49,7 +49,7 @@
             get_values/1,
             set_value/2
         ]).
--export_type([clock/0, base/0, timestamp/0]).
+-export_type([clock/0, base/0]).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -61,7 +61,6 @@
 -type base() :: {id(), counter(), list()}.
 -type id() :: any().
 -type counter() :: non_neg_integer().
--type timestamp() :: non_neg_integer().
 
 -spec new() -> clock().
 new() -> new([]).
