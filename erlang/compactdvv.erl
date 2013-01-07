@@ -56,35 +56,12 @@
 -endif.
 
 
-
-%%---------------------------------------------------------------------
-%% Data Type: person
-%% where:
-%%    name: A string (default is undefined).
-%%    age: An integer (default is undefined).
-%%    phone: A list of integers (default is []).
-%%    dict:     A dictionary containing various information about the person. 
-%%       A {Key, Value} list (default is the empty list).
-%%----------------------------------------------------------------------
-%-record(person, {name, age, phone = [], dict = []}).
-
-
 %% STRUCTURE
 -type clock() :: [base()].
 -type base() :: {id(), counter(), list()}.
 -type id() :: any().
 -type counter() :: non_neg_integer().
 -type timestamp() :: non_neg_integer().
-
-
-
-%%----------------------------------------------------------------------
-%% Function: new/1
-%% Purpose: Get various information from a process.
-%% Args:   Option is normal|all.
-%% Returns: A list of {Key, Value} 
-%%     or {error, Reason} (if the process is dead)
-%%----------------------------------------------------------------------
 
 -spec new() -> clock().
 new() -> new([]).
@@ -95,13 +72,6 @@ new(L) -> [{null, 0, L}].
 -spec new(id(), list()) -> clock().
 new(I,L) -> [{I, 0, L}].
 
-%%----------------------------------------------------------------------
-%% Function: get_server_statistics/2
-%% Purpose: Synchronize the 1st with the 2nd clock, and incremnt the 1st.
-%% Args:   Option is normal|all.
-%% Returns: A list of {Key, Value} 
-%%     or {error, Reason} (if the process is dead)
-%%----------------------------------------------------------------------
 -spec syncupdate(clock(), clock(), id(), any()) -> clock().
 syncupdate(Cc,Cr,R,V) -> event(sync(join(Cc),Cr),R,V).
 
