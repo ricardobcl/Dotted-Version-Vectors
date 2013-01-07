@@ -47,7 +47,8 @@
             get_last/1,
             get_last_value/1,
             get_values/1,
-            set_value/2
+            set_value/2,
+            map_values/2
         ]).
 -export_type([clock/0, base/0]).
 
@@ -184,6 +185,9 @@ set_value(Clock,V) ->
     [{I,C,[]}|T] = join(Clock),
     [{I,C-1,[V]}|T].
 
+-spec map_values(fun ((any()) -> any()), clock()) -> clock().
+map_values(F,Cl) -> [ {I,C,lists:map(F,V)} || {I,C,V} <- Cl].
+
 
 
 %% ===================================================================
@@ -283,6 +287,11 @@ get_set_test() ->
     ?assertEqual(get_values(A), [v0,v5,v3]),
     ?assertEqual(set_value(A,v9), [{a,3,[v9]},{b,0,[]},{c,1,[]}]),
     ?assertEqual(set_value([{null,0,[v1]}],v9), [{null,0,[v9]}]),
+    ok.
+
+map_values_test() ->
+    A = [{a,2,[5,0]},{b,0,[]},{c,0,[2]}],
+    ?assertEqual(map_values(fun (X) -> X*X end,A), [{a,2,[25,0]},{b,0,[]},{c,0,[4]}]),
     ok.
 
 
