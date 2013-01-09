@@ -84,7 +84,18 @@ syncupdate(C,R,V) -> event(join(C),R,V).
 sync(A,B) -> 
     Eq = [ {R1,max(N1,N2),merge(N1,L1,N2,L2)} || {R2,N2,L2} <- B, {R1,N1,L1} <- A, R1 =:= R2],
     K = proplists:get_keys(Eq),
-    Eq ++ sync_aux(K,A) ++ sync_aux(K,B).
+    R = Eq ++ sync_aux(K,A) ++ sync_aux(K,B),
+    %% order (descending) clocks by the number of values, so the 1st has the most values
+    lists:sort(fun compare_values_length/2, R). 
+
+-spec compare_values_length(base(), base()) -> boolean().
+compare_values_length({I1,_,L1},{I2,_,L2}) -> 
+    if 
+        length(L1) < length(L2) -> false;
+        length(L1) > length(L2) -> true;
+        length(L1) == length(L2) -> I1 < I2
+    end.
+
 
 sync_aux([],Acc) -> Acc;
 sync_aux([H|T],Acc) ->
@@ -226,7 +237,9 @@ event_test() ->
     ok.
 
 sync_test() ->
+    X = [{x,1,[]}],
     A = new(a,[v1]),
+    Y = new(b,[v2]),
     A1 = syncupdate(A,a,v2),
     R1 = sync(A,A1),
     R2 = sync(A1,A),
@@ -235,7 +248,13 @@ sync_test() ->
     A2b = syncupdate(A1,c,v3),
     R3 = sync(A2b,A2a),
     ?assertEqual(lists:sort(R3), [{a,2,[]},{b,0,[v3]},{c,0,[v3]}]),
-    ?assertEqual(lists:sort(R3), sync([A2b,A2a])),
+    ?assertEqual(lists:sort(R3), lists:sort(sync([A2b,A2a]))),
+    ?assertEqual(sync(X,A), [{a,0,[v1]},{x,1,[]}]), %% first clock MUST have a value!
+    ?assertEqual(sync(X,A), sync(A,X)),
+    %% order by id when length of values is the same
+    ?assertEqual(sync(A,Y), [{a,0,[v1]},{b,0,[v2]}]),
+    ?assertEqual(sync(Y,A), sync(A,Y)), 
+
     ok.
 
 lww_test() ->
