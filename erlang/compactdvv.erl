@@ -31,9 +31,7 @@
 
 -module(compactdvv).
 
--export([   new/0,
-            new/1,
-            new/2,
+-export([   new/2,
             sync/1,
             sync/2,
             syncupdate/4,
@@ -62,12 +60,6 @@
 -type base() :: {id(), counter(), list()}.
 -type id() :: any().
 -type counter() :: non_neg_integer().
-
--spec new() -> clock().
-new() -> new([]).
-
--spec new(list()) -> clock().
-new(L) -> [{null, 0, L}].
 
 -spec new(id(), list()) -> clock().
 new(I,L) -> [{I, 0, L}].
@@ -132,12 +124,12 @@ lww(C) ->
 
 -spec lww(fun ((A,A) -> boolean()), clock()) -> clock().
 lww(F,C) -> 
-    {I,_,V} = 
-        hd(lists:sort(fun({_,_,V1},{_,_,V2}) -> F(lists:last(V1),lists:last(V2)) end, C)),
+    V = hd(lists:sort(F,get_values(C))),
+    {I,_,_} = hd(C),
     C2 = join(C),
     case lists:keytake(I,1,C2) of
         %% it should find the value!
-        {value, {I,N,_}, C3} -> [{I,N-1,[lists:last(V)]} | C3]
+        {value, {I,N,_}, C3} -> [{I,N-1,[V]} | C3]
     end.
 
 -spec value_count(clock()) -> non_neg_integer().
@@ -207,8 +199,8 @@ map_values(F,Cl) -> [ {I,C,lists:map(F,V)} || {I,C,V} <- Cl].
 -ifdef(TEST).
 
 example_test() ->
-    A = new(),
-    B = new(),
+    A = new(null,[]),
+    B = new(null,[]),
     ?assertEqual(A,B),
     ok.
 
@@ -224,7 +216,7 @@ syncupdate_test() ->
     ok.
 
 join_test() ->
-    A = new(),
+    A = new(null,[]),
     B = new(a,[a,b]),
     ?assertEqual(join(A), [{null,0,[]}]),
     ?assertEqual(join(B), [{a,2,[]}]),
@@ -247,14 +239,16 @@ sync_test() ->
     A2a = syncupdate(A1,b,v3),
     A2b = syncupdate(A1,c,v3),
     R3 = sync(A2b,A2a),
-    ?assertEqual(lists:sort(R3), [{a,2,[]},{b,0,[v3]},{c,0,[v3]}]),
-    ?assertEqual(lists:sort(R3), lists:sort(sync([A2b,A2a]))),
+    ?assertEqual(R3, [{b,0,[v3]},{c,0,[v3]},{a,2,[]}]),
+    ?assertEqual(R3, sync([A2b,A2a])),
     ?assertEqual(sync(X,A), [{a,0,[v1]},{x,1,[]}]), %% first clock MUST have a value!
     ?assertEqual(sync(X,A), sync(A,X)),
+    ?assertEqual(sync(X,A), sync([A,X])),
     %% order by id when length of values is the same
     ?assertEqual(sync(A,Y), [{a,0,[v1]},{b,0,[v2]}]),
     ?assertEqual(sync(Y,A), sync(A,Y)), 
-
+    ?assertEqual(sync(Y,A), sync([A,Y])), 
+    ?assertEqual(sync(A,X), sync([X,A])),
     ok.
 
 lww_test() ->
