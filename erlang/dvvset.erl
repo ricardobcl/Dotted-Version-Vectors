@@ -1,7 +1,7 @@
 
 %%%-------------------------------------------------------------------
 %%%
-%%% File:      compactdvv.erl
+%%% File:      dvvset.erl
 %%%
 %%% @author    Ricardo Tomé Gonçalves <tome.wave@gmail.com>
 %%% @author    Paulo Sérgio Almeida <pssalmeida@gmail.com>
@@ -21,8 +21,10 @@
 %%% under the License.
 %%%
 %%% @doc  
-%%%  An Erlang implementation of the *compact* Dotted Version Vectors.
-%%%  Some functions were adapted from the vclock.erl file (for Version Vectors) of Basho's Riak.
+%%% An Erlang implementation of *compact* Dotted Version Vectors, which
+%%% provides a container for a set of concurrent values (siblings) with causal
+%%% order information.
+%%% Some functions were adapted from the vclock.erl file (for Version Vectors) of Basho's Riak.
 %%% @end  
 %%%
 %%% @reference
@@ -33,34 +35,34 @@
 %%%
 %%%-------------------------------------------------------------------
 
--module(compactdvv).
+-module(dvvset).
 
 -export([new/2,
          sync/1,
          sync/2,
-         syncupdate/4,
-         syncupdate/3,
          join/1,
-         lww/2,
-         strict_descendant/2,
-         value_count/1,
+         update/3,
+         update/4,
+         size/1,
+         ids/1,
+         values/1,
          equal/2,
-         get_last_value/2,
-         get_values/1,
-         set_value/3,
-         map_values/2
+         strict_descendant/2,
+         map/2,
+         last/2,
+         lww/2,
+         set_value/3
         ]).
 
--export_type([clock/0, entry/0]).
+-export_type([clock/0]).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
-
 %% STRUCTURE
 -type clock() :: [entry()].
--type entry() :: {id(), counter(), list()}.
+-type entry() :: {id(), counter(), [value()]}.
 -type id() :: any().
 -type value() :: any().
 -type counter() :: non_neg_integer().
@@ -68,13 +70,8 @@
 -spec new(id(), value()) -> clock().
 new(I, V) -> [{I, 0, [V]}].
 
--spec syncupdate(clock(), clock(), id(), value()) -> clock().
-syncupdate(Cc, Cr, R, V) -> event(sync(join(Cc), Cr), R, V).
-
-
--spec syncupdate(clock(), id(), value()) -> clock().
-syncupdate(Cc, R, V) -> event(join(Cc), R, V).
-
+-spec sync([clock()]) -> clock().
+sync(L) -> lists:foldl(fun sync/2, [], L).
 
 -spec sync(C1::clock(), C2::clock()) -> clock().
 sync([], C) -> C;
@@ -95,26 +92,69 @@ merge(I, N1, L1, N2, L2) ->
       true                 -> {I, N, lists:nthtail(N - N2, L2)}
     end.
 
-
--spec sync([clock()]) -> clock().
-sync(L) -> lists:foldl(fun sync/2, [], L).
-
-
 -spec join(clock()) -> clock().
-join(C) -> [{R, N+length(L), []} || {R, N, L} <- C].
+join(C) -> [{I, N+length(L), []} || {I, N, L} <- C].
 
+-spec update(clock(), id(), value()) -> clock().
+update(Cc, I, V) -> event(join(Cc), I, V).
 
--spec event(C::clock(), I::id(), V::value()) -> clock().
+-spec update(clock(), clock(), id(), value()) -> clock().
+update(Cc, Cs, I, V) -> event(sync(join(Cc), Cs), I, V).
+
 event([], I, V) -> [{I, 0, [V]}];
 event([{I, N, L} | T], I, V) -> [{I, N, L++[V]} | T];
 event([{I1, _, _} | _]=C, I, V) when I1 > I -> [{I, 0, [V]} | C];
 event([H | T], I, V) -> [H | event(T, I, V)].
 
+-spec size(clock()) -> non_neg_integer().
+size(C) -> lists:sum([length(L) || {_,_,L} <- C]).
+
+-spec ids(clock()) -> [id()].
+ids(C) ->
+    ([I || {I,_,_} <- C]).
+
+-spec values(clock()) -> [value()].
+values(C) ->
+    lists:append([L || {_,_,L} <- C]).
+
+-spec equal(C1::clock(), C2::clock()) -> boolean().
+equal([], []) -> true;
+equal([{I, C, L1} | T1], [{I, C, L2} | T2]) when length(L1) == length(L2) -> equal(T1, T2);
+equal(_, _) -> false.
+
+-spec strict_descendant(C1::clock(), C2::clock()) -> boolean().
+strict_descendant(A, B) -> greater(A, B, false).
+
+greater([], [], Strict) -> Strict;
+greater([_|_], [], _) -> true;
+greater([], [_|_], _) -> false;
+greater([{I, N1, L1} | T1], [{I, N2, L2} | T2], Strict) ->
+   Diff = (N1 + length(L1)) - (N2 + length(L2)),
+   if
+     Diff == 0 -> greater(T1, T2, Strict);
+     Diff >  0 -> greater(T1, T2, true);
+     Diff <  0 -> false
+   end;
+greater([{I1, _, _} | T1], [{I2, _, _} | _]=C2, _) when I1 < I2 -> greater(T1, C2, true);
+greater(_, _, _) -> false.
+
+-spec map(fun((value()) -> value()), clock()) -> clock().
+map(F, C) -> [ {I, N, lists:map(F, V)} || {I, N, V} <- C].
+
+-spec last(After::fun((value(),value()) -> boolean()), C::clock()) -> value().
+last(F, C) ->
+    {_, V} = find_entry(F, C),
+    V.
 
 -spec lww(After::fun((value(),value()) -> boolean()), clock()) -> clock().
 lww(_, []) -> [];
 lww(F, C) -> 
     {I, V} = find_entry(F, C),
+    join_and_replace(I, V, C).
+
+-spec set_value(After::fun((value(),value()) -> boolean()), V::value(), C::clock()) -> clock().
+set_value(F, V, C) ->
+    {I, _} = find_entry(F, C),
     join_and_replace(I, V, C).
 
 find_entry(F, [{_, _, []} | T]) -> find_entry(F, T);
@@ -136,56 +176,6 @@ join_and_replace(Ir, V, C) ->
      end
      || {I, N, L} <- C].
 
-
--spec value_count(clock()) -> non_neg_integer().
-value_count(C) -> lists:sum([length(L) || {_,_,L} <- C]).
-
-
--spec equal(C1::clock(), C2::clock()) -> boolean().
-equal([], []) -> true;
-equal([{I, C, L1} | T1], [{I, C, L2} | T2]) when length(L1) == length(L2) -> equal(T1, T2);
-equal(_, _) -> false.
-
-
--spec strict_descendant(C1::clock(), C2::clock()) -> boolean().
-strict_descendant(A, B) -> greater(A, B, false).
-
-greater([], [], Strict) -> Strict;
-greater([_|_], [], _) -> true;
-greater([], [_|_], _) -> false;
-greater([{I, N1, L1} | T1], [{I, N2, L2} | T2], Strict) ->
-   Diff = (N1 + length(L1)) - (N2 + length(L2)),
-   if
-     Diff == 0 -> greater(T1, T2, Strict);
-     Diff >  0 -> greater(T1, T2, true);
-     Diff <  0 -> false
-   end;
-greater([{I1, _, _} | T1], [{I2, _, _} | _]=C2, _) when I1 < I2 -> greater(T1, C2, true);
-greater(_, _, _) -> false.
-
-
--spec get_last_value(After::fun((value(),value()) -> boolean()), C::clock()) -> value().
-get_last_value(F, C) ->
-    {_, V} = find_entry(F, C),
-    V.
-
-
--spec get_values(clock()) -> [value()].
-get_values(C) ->
-    lists:append([L || {_,_,L} <- C]).
-
-
--spec set_value(After::fun((value(),value()) -> boolean()), V::value(), C::clock()) -> clock().
-set_value(F, V, C) ->
-    {I, _} = find_entry(F, C),
-    join_and_replace(I, V, C).
-
-
--spec map_values(fun((value()) -> value()), clock()) -> clock().
-map_values(F, C) -> [ {I, N, lists:map(F, V)} || {I, N, V} <- C].
-
-
-
 %% ===================================================================
 %% EUnit tests
 %% ===================================================================
@@ -197,14 +187,14 @@ map_values(F, C) -> [ {I, N, lists:map(F, V)} || {I, N, V} <- C].
 %    ?assertEqual(A,B),
 %    ok.
 
-syncupdate_test() ->
+update_test() ->
     A = new(a,v1),
-    A1 = syncupdate(A,A,a,v2),
+    A1 = update(A,A,a,v2),
     ?assertEqual([{a,1,[v2]}], A1),
-    A2 = syncupdate(A1,b,v3),
+    A2 = update(A1,b,v3),
     ?assertEqual([{a,2,[]}, {b,0,[v3]}], A2),
-    A2b = syncupdate(A1,A2,c,v3),
-    A3 = syncupdate(A2b,a,v4),
+    A2b = update(A1,A2,c,v3),
+    A3 = update(A2b,a,v4),
     ?assertEqual([{a,2,[v4]}, {b,1,[]}, {c,1,[]}], A3),
     ok.
 
@@ -212,7 +202,7 @@ join_test() ->
     A = new(a,v),
     ?assertEqual(join(A), [{a,1,[]}]),
     B = new(b,v),
-    C = syncupdate(B, B, b, v1),
+    C = update(B, B, b, v1),
     ?assertEqual(join(C), [{b,2,[]}]),
     D = sync(A, C),
     ?assertEqual(join(D), [{a,1,[]}, {b,2,[]}]),
@@ -228,12 +218,12 @@ sync_test() ->
     X = [{x,1,[]}],
     A = new(a,v1),
     Y = new(b,v2),
-    A1 = syncupdate(A,a,v2),
+    A1 = update(A,a,v2),
     R1 = sync(A,A1),
     R2 = sync(A1,A),
     ?assertEqual(R1,R2),
-    A2a = syncupdate(A1,b,v3),
-    A2b = syncupdate(A1,c,v3),
+    A2a = update(A1,b,v3),
+    A2b = update(A1,c,v3),
     R3 = sync(A2b,A2a),
     ?assertEqual(R3, [{a,2,[]}, {b,0,[v3]}, {c,0,[v3]}]),
     ?assertEqual(R3, sync([A2b,A2a])),
@@ -248,21 +238,21 @@ sync_test() ->
     ok.
 
 %lww_test() ->
-%    ?assertEqual(v5, get_last_value([{a,1,[v0,v5]},{b,1,[]},{c,1,[v7]}])),
+%    ?assertEqual(v5, last([{a,1,[v0,v5]},{b,1,[]},{c,1,[v7]}])),
 %    ?assertEqual([{a,2,[v5]},{b,1,[]},{c,2,[]}], lww([{a,1,[v0,v5]},{b,1,[]},{c,1,[v7]}])),
 %    ok.
 
-value_count_test() ->
-    ?assertEqual(3, value_count([{a,2,[v0,v5]},{b,0,[]},{c,0,[v3]}])),
+size_test() ->
+    ?assertEqual(3, dvvset:size([{a,2,[v0,v5]},{b,0,[]},{c,0,[v3]}])),
     ok.
 
 strict_descendant_test() ->
     A = new(a,v1),
-    B = syncupdate(A,a,v2),
-    B2 = syncupdate(A,b,v2),
-    B3 = syncupdate(A,z,v2),
-    C = syncupdate(B,A,c,v3),
-    D = syncupdate(C,B2,d,v5),
+    B = update(A,a,v2),
+    B2 = update(A,b,v2),
+    B3 = update(A,z,v2),
+    C = update(B,A,c,v3),
+    D = update(C,B2,d,v5),
     ?assert(strict_descendant(B,A)),
     ?assert(strict_descendant(C,A)),
     ?assert(strict_descendant(C,B)),
@@ -292,16 +282,15 @@ equal_test() ->
 get_set_test() ->
     A = [{a,2,[v0,v5]},{b,0,[]},{c,0,[v3]}],
 %    ?assertEqual(get_last(A), {a,2,[v0,v5]}),
-%    ?assertEqual(get_last_value(A), v5),
-    ?assertEqual(get_values(A), [v0,v5,v3]),
+%    ?assertEqual(last(A), v5),
+    ?assertEqual(values(A), [v0,v5,v3]),
 %    ?assertEqual(set_value(A,v9), [{a,3,[v9]},{b,0,[]},{c,1,[]}]),
 %    ?assertEqual(set_value([{null,0,[v1]}],v9), [{null,0,[v9]}]),
     ok.
 
-map_values_test() ->
+map_test() ->
     A = [{a,2,[5,0]},{b,0,[]},{c,0,[2]}],
-    ?assertEqual(map_values(fun (X) -> X*X end,A), [{a,2,[25,0]},{b,0,[]},{c,0,[4]}]),
+    ?assertEqual(map(fun (X) -> X*X end,A), [{a,2,[25,0]},{b,0,[]},{c,0,[4]}]),
     ok.
-
 
 -endif.
