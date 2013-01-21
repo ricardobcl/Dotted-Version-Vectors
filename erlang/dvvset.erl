@@ -61,14 +61,18 @@
 -endif.
 
 %% STRUCTURE
--type clock() :: [entry()].
+-type clock() :: {[entry()], [value()]}.
 -type entry() :: {id(), counter(), [value()]}.
+-type vector() :: [{id(), counter()}].
 -type id() :: any().
 -type value() :: any().
 -type counter() :: non_neg_integer().
 
--spec new(id(), value()) -> clock().
-new(I, V) -> [{I, 1, [V]}].
+-spec new(vector(), value()) -> clock().
+new(VV, V) -> 
+  VVS = lists:sort(VV), % defensive against non-order preserving serialization
+  {[{I, N, []} || {I, N} <- VVS], [V]}.
+
 
 -spec sync([clock()]) -> clock().
 sync(L) -> lists:foldl(fun sync/2, [], L).
@@ -127,8 +131,8 @@ equal([], []) -> true;
 equal([{I, C, L1} | T1], [{I, C, L2} | T2]) when length(L1) == length(L2) -> equal(T1, T2);
 equal(_, _) -> false.
 
--spec strict_descendant(C1::clock(), C2::clock()) -> boolean().
-strict_descendant(A, B) -> greater(A, B, false).
+-spec less(C1::clock(), C2::clock()) -> boolean().
+less(A, B) -> greater(B, A, false).
 
 greater([], [], Strict) -> Strict;
 greater([_|_], [], _) -> true;
@@ -154,11 +158,6 @@ last(F, C) ->
 lww(_, []) -> [];
 lww(F, C) -> 
     {I, V} = find_entry(F, C),
-    join_and_replace(I, V, C).
-
--spec set_value(After::fun((value(),value()) -> boolean()), V::value(), C::clock()) -> clock().
-set_value(F, V, C) ->
-    {I, _} = find_entry(F, C),
     join_and_replace(I, V, C).
 
 find_entry(F, [{_, _, []} | T]) -> find_entry(F, T);
