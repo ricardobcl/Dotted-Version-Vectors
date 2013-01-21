@@ -37,7 +37,8 @@
 
 -module(dvvset).
 
--export([new/2,
+-export([new/1,
+         new/2,
          sync/1,
          sync/2,
          join/1,
@@ -47,32 +48,33 @@
          ids/1,
          values/1,
          equal/2,
-         strict_descendant/2,
+         less/2,
          map/2,
          last/2,
-         lww/2,
-         set_value/3
+         lww/2
         ]).
 
--export_type([clock/0]).
+-export_type([clock/0, vector/0, id/0, value/0]).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
 %% STRUCTURE
--type clock() :: {[entry()], [value()]}.
+-opaque clock() :: {[entry()], [value()]}.
 -type entry() :: {id(), counter(), [value()]}.
--type vector() :: [{id(), counter()}].
+-opaque vector() :: [{id(), counter()}].
 -type id() :: any().
 -type value() :: any().
 -type counter() :: non_neg_integer().
+
+-spec new(value()) -> clock().
+new(V) -> new([], V).
 
 -spec new(vector(), value()) -> clock().
 new(VV, V) -> 
   VVS = lists:sort(VV), % defensive against non-order preserving serialization
   {[{I, N, []} || {I, N} <- VVS], [V]}.
-
 
 -spec sync([clock()]) -> clock().
 sync(L) -> lists:foldl(fun sync/2, [], L).
@@ -103,8 +105,8 @@ merge(I, N1, L1, N2, L2) ->
           end
     end.
 
--spec join(clock()) -> clock().
-join(C) -> [{I, N, []} || {I, N, _} <- C].
+-spec join(clock()) -> vector().
+join(C) -> [{I, N} || {I, N, _} <- C].
 
 -spec update(clock(), id(), value()) -> clock().
 update(Cc, I, V) -> event(join(Cc), I, V).
