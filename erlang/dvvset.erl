@@ -44,12 +44,10 @@
 %%%      -- update the causal history of C using the server ID, and the local server clock() Cs using update(C, Cs, serverID);
 %%%
 %%% 4 - A coordinator of a write sends to a replica the new clock() C to synchronize locally ->
-%%%      -- see if the incoming clock() C in causally newer than the local clock Cr using less(Cr, C);
-%%%      -- if less(Cr, C) is true, save locally the clock() C, since Cr is outdated;
-%%%      -- otherwise, the new clock() C and the local clock() Cr must be reconciled into 1 clock() using C2 = sync(C, Cr), that discarded causally outdated values and merged the causal history of both C and Cr. Thus, save locally the clock() C2.
+%%%      -- the new clock() C and the local clock() Cr must be reconciled into 1 clock() using C2 = sync(C, Cr), which discards causally outdated values and merges the causal history of both C and Cr, and save locally the clock() C2.
 %%%
 %%% 5 - An anti-entropy synchronization between 2 replicas ->
-%%%      -- the local replica should test if the local clock() C is causally newer than the remote clock() Cr, using less(Cr,C). If less(Cr,C) is true, then we have the updated clock() so we should do nothing. If not we should use C2 = sync(C,Cr) to reconcile both clocks and write locally the resulting clock() C2.
+%%%      -- the local replica should test if the local clock() C is causally newer than the remote clock() Cr, using less(Cr,C). If less(Cr,C) is true, then we already have the newest clock() so do nothing. Otherwise, we should do C2 = sync(C,Cr) to reconcile both clocks and write locally the resulting clock() C2.
 %%%
 %%% 6 - A client writes a value V but does not care for conflicts, thus the last value should always win a conflict and be written (a technique often called last-write-wins or lww) ->
 %%%      -- the server does a normal write (as in step 3), but with the resulting clock() C, we should use C2 = lww(F,C), where F is a function that compares two values F(A,B) and returns true if A wins, or false otherwise. C2 has the same causal information of C, but with only 1 value, according to F;
@@ -130,15 +128,16 @@ sync(L) -> lists:foldl(fun sync/2, {}, L).
 sync({},C) -> C;
 sync(C,{}) -> C;
 sync(C1={E1,V1},C2={E2,V2}) ->
-    V = case less(C1,C2) of
-            true  -> V2; % C1 < C2 => keep V2
-            false -> case less(C2,C1) of
-                        true  -> V1; % C2 < C1 => keep V1
-                        % or else keep all unique values
-                        false -> sets:to_list(sets:from_list(V1++V2))
-                     end
-        end,
-    {sync2(E1,E2),V}.
+    case less(C1,C2) of
+        true  -> C2; % C1 < C2 => return C2
+        false -> case less(C2,C1) of
+                    true  -> C1; % C2 < C1 => return C1
+                    
+                    false -> % keep all unique anonymous values and sync entries()
+                        V3 = sets:to_list(sets:from_list(V1++V2)),
+                        {sync2(E1,E2),V3}
+                 end
+    end.
 
 %% Private function
 -spec sync2(entries(), entries()) -> entries().
