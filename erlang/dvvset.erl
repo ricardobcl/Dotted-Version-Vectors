@@ -107,7 +107,7 @@
 %% @doc Constructs a new clock set with no causal history,
 %% and the new value in the anonymous list.
 -spec new(value()) -> clock().
-new(V) -> new([], V).
+new(V) -> new([], [V]).
 
 %% @doc Constructs a new clock set with the causal history
 %% of the given version vector / vector clock,
