@@ -6,53 +6,21 @@
 %%% @author    Ricardo Tomé Gonçalves <tome.wave@gmail.com>
 %%% @author    Paulo Sérgio Almeida <pssalmeida@gmail.com>
 %%%
-%%% This file is provided to you under the Apache License,
-%%% Version 2.0 (the "License"); you may not use this file
-%%% except in compliance with the License.  You may obtain
-%%% a copy of the License at
+%%% The MIT License (MIT)
+%%% Copyright (C) 2013
 %%%
-%%%   http://www.apache.org/licenses/LICENSE-2.0
+%%% Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 %%%
-%%% Unless required by applicable law or agreed to in writing,
-%%% software distributed under the License is distributed on an
-%%% "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-%%% KIND, either express or implied.  See the License for the
-%%% specific language governing permissions and limitations
-%%% under the License.
+%%% The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+%%%
+%%% THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 %%%
 %%% @doc  
 %%% An Erlang implementation of *compact* Dotted Version Vectors, which
 %%% provides a container for a set of concurrent values (siblings) with causal
 %%% order information.
-%%% Some functions were adapted from the vclock.erl file (for Version Vectors) of Basho's Riak.
 %%%
-%%% This file represents the data structure *clock()*. We can use this to keep a value and its causal history, with the support for multiples values if they are causally conflicting. The clock() is supposed to have 1 value, unless we synchronize or update 2 conflicting clocks (we cannot decide through their causal history, which one is newer).
-%%% Therefore, this data structure abstracts the process of tracking and reasoning about the causal relationship of multiple values.
-%%%
-%%% The main use case in which this was thought is a server-client system like a database. For this, the common usage of our clock() is the following:
-%%%
-%%% 1 - A new value V from the client -> 
-%%%      -- create a new clock() for the value using C = new(V);
-%%%      -- update the causal history of C using the server ID using update(C, serverID);
-%%%
-%%% 2 - A read from the client -> 
-%%%      -- synchronize different server clocks using C = sync("list of clocks");
-%%%      -- return the value(s) using values(C) and an opaque version vector using join(C);
-%%%
-%%% 3 - A write from the client with an updated V and an opaque (unaltered) version vector VV (obtained from a previous read on this key) ->
-%%%      -- create a new clock() for the value using C = new(VV, V);
-%%%      -- update the causal history of C using the server ID, and the local server clock() Cs using update(C, Cs, serverID);
-%%%
-%%% 4 - A coordinator of a write sends to a replica the new clock() C to synchronize locally ->
-%%%      -- the new clock() C and the local clock() Cr must be reconciled into 1 clock() using C2 = sync(C, Cr), which discards causally outdated values and merges the causal history of both C and Cr, and save locally the clock() C2.
-%%%
-%%% 5 - An anti-entropy synchronization between 2 replicas ->
-%%%      -- the local replica should test if the local clock() C is causally newer than the remote clock() Cr, using less(Cr,C). If less(Cr,C) is true, then we already have the newest clock() so do nothing. Otherwise, we should do C2 = sync(C,Cr) to reconcile both clocks and write locally the resulting clock() C2.
-%%%
-%%% 6 - A client writes a value V but does not care for conflicts, thus the last value should always win a conflict and be written (a technique often called last-write-wins or lww) ->
-%%%      -- the server does a normal write (as in step 3), but with the resulting clock() C, we should use C2 = lww(F,C), where F is a function that compares two values F(A,B) and returns true if A wins, or false otherwise. C2 has the same causal information of C, but with only 1 value, according to F;
-%%%      -- we could only do C = new(V) and write C immediately, saving the cost of a local read to do the update() + lww(), but we should preserve causal information if this lww strategy setting could be set on and off in this key lifetime;
-%%%
+%%% For further reading, visit the <a href="https://github.com/ricardobcl/Dotted-Version-Vectors/tree/compact">github page</a>.
 %%% @end  
 %%%
 %%% @reference
@@ -85,15 +53,15 @@
          less/2,
          map/2,
          last/2,
-         lww/2
+         lww/2,
+         reconcile/2
         ]).
 
 -export_type([clock/0, vector/0, id/0, value/0]).
 
-
-%% STRUCTURE
-%% Invariants:
-%%      * entries() is sorted by id()
+%% @doc
+%% STRUCTURE details:
+%%      * entries() are sorted by id()
 %%      * each counter() also includes the number of values in that id()
 %%      * the values in each triple of entries() are causally ordered and each new value goes to the head of the list
 
@@ -137,19 +105,18 @@ sync(L) -> lists:foldl(fun sync/2, {}, L).
 %% @doc Synchronizes 2 clocks.
 %% Discards (causally) outdated values, while merging both causal histories.
 -spec sync(clock(), clock()) -> clock().
-sync({},C) -> C;
-sync(C,{}) -> C;
+sync({}, C) -> C;
+sync(C ,{}) -> C;
 sync(C1={E1,V1},C2={E2,V2}) ->
-    case less(C1,C2) of
-        true  -> C2; % C1 < C2 => return C2
+    V = case less(C1,C2) of
+        true  -> V2; % C1 < C2 => return V2
         false -> case less(C2,C1) of
-                    true  -> C1; % C2 < C1 => return C1
-                    
+                    true  -> V1; % C2 < C1 => return V1
                     false -> % keep all unique anonymous values and sync entries()
-                        V3 = sets:to_list(sets:from_list(V1++V2)),
-                        {sync2(E1,E2),V3}
+                        sets:to_list(sets:from_list(V1++V2))
                  end
-    end.
+    end,
+    {sync2(E1,E2),V}.
 
 %% Private function
 -spec sync2(entries(), entries()) -> entries().
@@ -275,7 +242,7 @@ last(F, C) ->
    V2.
 
 %% @doc Return a clock with the same causal history, but with only one
-%% value in the anonymous placeholder. This value is the latest value
+%% value in its original position. This value is the latest value
 %% in the given clock, according to the function F, which returns True
 %% if the 1st value in "newer" than the 2nd value. False otherwise.
 -spec lww(After::fun((value(),value()) -> boolean()), clock()) -> clock().
@@ -284,6 +251,14 @@ lww(F, C={E,_}) ->
         {id, I, V}      -> {join_and_replace(I, V, E),[]};
         {anonym, _, V}  -> new(join(C),V)
     end.
+
+%% @doc Return a clock with the same causal history, but with only one
+%% value in the anonymous placeholder. This value is the result of
+%% the function F, which takes all values and returns a single new value.
+-spec reconcile(Winner::fun(([value()]) -> value()), clock()) -> clock().
+reconcile(F, C) ->
+    V = F(values(C)),
+    new(join(C),V).
 
 %% find_entry/2 - Private function
 find_entry(F, {[], [V|T]}) -> find_entry(F, null, V, {[],T}, anonym);
@@ -340,30 +315,25 @@ new_test() ->
 
 join_test() ->
     A  = new(v1),
-    A1 = update(A,a), % a => 1
+    A1 = update(A,a),
     B  = new(join(A1),v2),
-    B1 = update(B, A1, b), % b => 1
+    B1 = update(B, A1, b),
     ?assertEqual( join(A)  , []             ),
     ?assertEqual( join(A1) , [{a,1}]        ),
     ?assertEqual( join(B1) , [{a,1},{b,1}]  ),
     ok.
 
 update_test() ->
-    A  = new(v1),
-    A0 = update(A,a),
+    A0 = update(new(v1),a),
     A1 = update(new(join(A0),v2), A0, a),
     A2 = update(new(join(A1),v3), A1, b),
     A3 = update(new(join(A0),v4), A1, b),
+    A4 = update(new(join(A0),v5), A1, a),
     ?assertEqual( A0 , {[{a,1,[v1]}],[]}                ),
     ?assertEqual( A1 , {[{a,2,[v2]}],[]}                ),
     ?assertEqual( A2 , {[{a,2,[]}, {b,1,[v3]}],[]}      ),
     ?assertEqual( A3 , {[{a,2,[v2]}, {b,1,[v4]}],[]}    ),
-    ok.
-
-event_test() ->
-    {A,_} = update(new(v1),a),
-    ?assertEqual( event(A,a,v2) , [{a,2,[v2,v1]}]           ),
-    ?assertEqual( event(A,b,v2) , [{a,1,[v1]}, {b,1,[v2]}]  ),
+    ?assertEqual( A4 , {[{a,3,[v5,v2]}],[]}             ),
     ok.
 
 sync_test() ->
@@ -374,6 +344,10 @@ sync_test() ->
     A3  = update(new(join(A1),v3), b),
     A4  = update(new(join(A1),v3), c),
     F   = fun (L,R) -> L>R end,
+    W   = {[{a,1,[]}],[]},
+    Z   = {[{a,2,[v2,v1]}],[]},
+    ?assertEqual( sync(W,Z)     , {[{a,2,[v2]}],[]}                         ),
+    ?assertEqual( sync(W,Z)     , sync(Z,W)                                 ),
     ?assertEqual( sync(A,A1)    , sync(A1,A)                                ),
     ?assertEqual( sync(A4,A3)   , sync([A3,A4])                             ),
     ?assertEqual( sync(A4,A3)   , {[{a,2,[]}, {b,1,[v3]}, {c,1,[v3]}],[]}   ),
@@ -387,14 +361,45 @@ sync_test() ->
     ?assertEqual( lww(F,A4)     , sync(A4,lww(F,A4))                        ),
     ok.
 
+syn_update_test() ->
+    A0  = update(new(v1), a),              % Mary writes v1 w/o VV
+    VV1 = join(A0),                        % Peter reads v1 with version vector (VV)
+    A1  = update(new(v2), A0, a),          % Mary writes v2 w/o VV
+    A2  = update(new(VV1,v3), A1, a),      % Peter writes v3 with VV from v1
+    ?assertEqual( VV1 , [{a,1}]                          ),
+    ?assertEqual( A0  , {[{a,1,[v1]}],[]}                ),
+    ?assertEqual( A1  , {[{a,2,[v2,v1]}],[]}             ),
+    %% now A2 should only have v2 and v3, since v3 was causally newer than v1
+    ?assertEqual( A2  , {[{a,3,[v3,v2]}],[]}             ),
+    ok.
+
+event_test() ->
+    {A,_} = update(new(v1),a),
+    ?assertEqual( event(A,a,v2) , [{a,2,[v2,v1]}]           ),
+    ?assertEqual( event(A,b,v2) , [{a,1,[v1]}, {b,1,[v2]}]  ),
+    ok.
+
 lww_last_test() ->
     F = fun (A,B) -> A>B end,
     X = {[{a,4,[5,2]},{b,1,[]},{c,1,[3]}],[]},
     Y = {[{a,4,[5,2]},{b,1,[]},{c,1,[3]}],[10,0]},
+    Z = {[{a,4,[5,2]}, {b,1,[1]}], [3]},
     ?assertEqual( last(F,X) , 5                                     ),
     ?assertEqual( last(F,Y) , 10                                    ),
     ?assertEqual( lww(F,X)  , {[{a,4,[5]},{b,1,[]},{c,1,[]}],[]}    ),
     ?assertEqual( lww(F,Y)  , {[{a,4,[]},{b,1,[]},{c,1,[]}],[10]}   ),
+    ?assertEqual( lww(F,Z)  , {[{a,4,[5]},{b,1,[]}],[]}             ),
+    ok.
+
+reconcile_test() ->
+    F1 = fun (L) -> lists:sum(L) end,
+    F2 = fun (L) -> hd(lists:sort(L)) end,
+    X  = {[{a,4,[5,2]},{b,1,[]},{c,1,[3]}],[]},
+    Y  = {[{a,4,[5,2]},{b,1,[]},{c,1,[3]}],[10,0]},
+    ?assertEqual( reconcile(F1,X) , {[{a,4,[]},{b,1,[]},{c,1,[]}],[10]} ),
+    ?assertEqual( reconcile(F1,Y) , {[{a,4,[]},{b,1,[]},{c,1,[]}],[20]} ),
+    ?assertEqual( reconcile(F2,X) , {[{a,4,[]},{b,1,[]},{c,1,[]}],[2]}  ),
+    ?assertEqual( reconcile(F2,Y) , {[{a,4,[]},{b,1,[]},{c,1,[]}],[0]}  ),
     ok.
 
 less_test() ->
@@ -420,9 +425,9 @@ less_test() ->
     ok.
 
 equal_test() ->
-    A = {[{a,4,[v0,v5]},{b,0,[]},{c,1,[v3]}], [v0]},
-    B = {[{a,4,[v0,v555]}, {b,0,[]}, {c,1,[v3]}], []},
-    C = {[{a,4,[v0,v5]},{b,0,[]}], [v1,v6]},
+    A = {[{a,4,[v5,v0]},{b,0,[]},{c,1,[v3]}], [v0]},
+    B = {[{a,4,[v555,v0]}, {b,0,[]}, {c,1,[v3]}], []},
+    C = {[{a,4,[v5,v0]},{b,0,[]}], [v6,v1]},
     % compare only the causal history
     ?assert(    equal(A,B) ),
     ?assert(    equal(B,A) ),
@@ -432,7 +437,7 @@ equal_test() ->
 
 size_test() ->
     ?assertEqual( 1 , ?MODULE:size(new(v1))                                         ),
-    ?assertEqual( 5 , ?MODULE:size({[{a,4,[v0,v5]},{b,0,[]},{c,1,[v3]}],[v4,v1]})   ),
+    ?assertEqual( 5 , ?MODULE:size({[{a,4,[v5,v0]},{b,0,[]},{c,1,[v3]}],[v4,v1]})   ),
     ok.
 
 ids_values_test() ->
