@@ -18,7 +18,7 @@ Let's assume the scenario of a Distributed Key-Value Storage (Ex: Riak, Cassandr
 We can use CCS to keep a value and its causal history, with the support for multiples values if they are causally conflicting. One CCS is supposed to have 1 value, unless we synchronize or write conflicting CCS (we cannot decide through their causal history, which one is newer).
 Therefore, this data structure abstracts the process of tracking and reasoning about the causal relationship of multiple values.
 
-----
+
 ## Why not Version Vectors (Vector Clocks)?
 
 First, [Version Vectors are not Vector Clocks][blog VV are not VC]. We are targeting Version Vectors (VV) in this case. Specifically, VV are not suited to support conflicting values. When using VV, we couple a value to a VV, and if we try to reconcile two values using their VV, sometimes we have conflicts and want to keep both values. In this situation, want to do with their VV? We have a couple of options: (#1) keep both values and both VV; (#2) keep both values and merge their VV.
@@ -45,7 +45,7 @@ Another solution is to keep both values and merge their VV into one, which saves
 **Problem**: We lose the information that *v2* was associated with (A,2) and not (A,3). In the third write we can see how this approach could lead to **false conflicts**. *v3* is being written with (A,1), therefore we know that it should win over *v1* and conflict with *v3*, but since we lost information about the causal past of *v1*, the server has no other option but to keep all three values and merge the VV again. Now the problem is even worse, since we are saying that all three values are related to (A,3). It's easy to see that this could lead to undesired behavior and an explosion of false conflicts.
 
 
----
+
 ## The Solution: Causal Clock Sets
 
 We solve the problems above with Causal Clock Sets (CCS). Instead of having a mapping between values and their causal information (be it Version Vectors or some other mechanism), we provide a data structure that keeps values and causal information together, while providing a sensible API to manipulate it.
@@ -105,80 +105,80 @@ Here is an (Erlang) example of `lww`:
 
 We use a function that simply picks the highest value between two values, and use it to sort out which value is the "latest" according to this function. Naturally, in this case it is value 5. Notice how it stay in its original triplet instead of going to anonymous list.
 
-----
+
 ## How to use
 
 The major use case we thought for CCS was a client-server system like a distributed database. So here are the common uses of CCS to implement in that case:
 
-1. **A new value V from the client**
+1. **A client writes a new value**
 
-```Erlang
-    %% create a new CCS for the new value
-    CCS = new(V),
-    %% update the causal history of CCS using the server ID
-    CCS2 = update(CCS, serverID),
-    %% store CCS2...
-```
+    ```Erlang
+        %% create a new CCS for the new value V
+        NewCCS = new(V),
+        %% update the causal history of CCS using the server identifier
+        CCS = update(NewCCS, ServerID),
+        %% store CCS...
+    ```
 
-2. **A read from the client**
+2. **A client reads a value**
 
-```Erlang
-    %% synchronize different server clocks
-    CCS = sync(ListOfCCS),
-    %% get the value(s)
-    Val = values(CCS),
-    %% get the causal information (version vector)
-    VV = join(CCS),
-    %% return both to client...
-```
+    ```Erlang
+        %% synchronize from different server CCS
+        CCS = sync(ListOfCCS),
+        %% get the value(s)
+        Val = values(CCS),
+        %% get the causal information (version vector)
+        VV = join(CCS),
+        %% return both to client...
+    ```
 
-3. **A write from the client with an updated V and an opaque (unaltered) version vector (obtained from a previous read on this key)**
+3. **A client writes an updated value and an opaque (unaltered) version vector (obtained from a previous read on this key)**
 
-```Erlang
-    %% create a new CCS for the new value, using the client's version vector
-    CCS = new(VV, V),
-    %% update the new CCS with the local server CCS and the server ID
-    CCS2 = update(CCS, LocalCCS, serverID),
-    %% store CCS2...
-```
+    ```Erlang
+        %% create a new CCS for the new value V, using the client's version vector VV
+        NewCCS = new(VV, V),
+        %% update the new CCS with the local server CCS and the server ID
+        CCS = update(NewCCS, LocalCCS, ServerID),
+        %% store CCS...
+    ```
 
-4. **A replica receives a CCS from the coordinator to synchronize are store locally**
+4. **A replica receives a CCS from the coordinator to (synchronize and) store locally**
 
-```Erlang
-    %% synchronize both the receiving CCS and the local CCS
-    SyncCCS = sync(NewCCS, LocalCCS),
-    %% store SyncCCS...
-```
+    ```Erlang
+        %% synchronize the new CCS with the local CCS
+        CCS = sync(NewCCS, LocalCCS),
+        %% store CCS...
+    ```
 
-5. **A replica receives a CCS from another replica to synchronize for anti-entropy**
+5. **A replica receives a CCS from another replica to synchronize for anti-entropy (keeps replicas up-to-date)**
 
-```Erlang
-    %% test if the local CCS is causally newer than the remote CCS
-    case less(NewCCS, LocalCCS) of
-        %% we already have the newest CCS so do nothing
-        true  -> do_nothing;
-        %% reconcile both and write locally the resulting CCS
-        false -> SyncCCS = sync(NewCCS, LocalCCS),
-                 %% store SyncCCS...
-    end.
-```
+    ```Erlang
+        %% test if the local CCS is causally newer than the remote CCS
+        case less(NewCCS, LocalCCS) of
+            %% we already have the newest CCS so do nothing
+            true  -> do_nothing;
+            %% reconcile both and write locally the resulting CCS
+            false -> CCS = sync(NewCCS, LocalCCS),
+                     %% store CCS...
+        end.
+    ```
 
 6. **A client writes a new value V with the *last-write-wins* policy**
 
-```Erlang
-    %% create a new CCS for the new value, using the client's version vector
-    CCS = new(VV, V),
-    %% update the new CCS with the local server CCS and the server ID
-    CCS2 = update(CCS, LocalCCS, serverID),
-    %% preserve the causal information of CCS2 but keep only 1 value, 
-    %% according to the ordering function F
-    CCS3 = lww(F, CCS2)
-    %% store CCS3...
-```
-We could only do `CCS = new(V)` and write CCS immediately, saving the cost of a local read, but generally its safer to preserve causal information, especially if the *lww* policy can be turn on and off per request or changed during a key lifetime;
+    ```Erlang
+        %% create a new CCS for the new value, using the client's version vector
+        NewCCS = new(VV, V),
+        %% update the new CCS with the local server CCS and the server ID
+        UpdCCS = update(NewCCS, LocalCCS, ServerID),
+        %% preserve the causal information of UpdCCS, but keep only 1 value 
+        %% according to the ordering function F
+        CCS = lww(F, UpdCCS)
+        %% store CCS...
+    ```
+    We could do only `CCS = new(V)` and write CCS immediately, saving the cost of a local read, but generally its safer to preserve causal information, especially if the *lww* policy can be turn on and off per request or changed during a key lifetime;
 
 
-----
+
 ## Real World Use Case
 
 We implemented CCS in our fork of [Basho's][riak site] [Riak][riak github] NoSQL database, in favor of their VV implementation, as a proof of concept. 
