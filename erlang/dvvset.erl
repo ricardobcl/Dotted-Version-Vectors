@@ -3,10 +3,11 @@
 %%%
 %%% File:      dvvset.erl
 %%%
+%%% @title Dotted Version Vector Set
 %%% @author    Ricardo Tomé Gonçalves <tome.wave@gmail.com>
 %%% @author    Paulo Sérgio Almeida <pssalmeida@gmail.com>
 %%%
-%%% The MIT License (MIT)
+%%% @copyright The MIT License (MIT)
 %%% Copyright (C) 2013
 %%%
 %%% Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
@@ -42,7 +43,6 @@
          new2/1,
          new2/2,
          sync/1,
-         sync/2,
          join/1,
          update/2,
          update/3,
@@ -59,7 +59,7 @@
 
 -export_type([clock/0, vector/0, id/0, value/0]).
 
-%% @doc
+% % @doc
 %% STRUCTURE details:
 %%      * entries() are sorted by id()
 %%      * each counter() also includes the number of values in that id()

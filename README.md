@@ -114,9 +114,9 @@ The major use case we thought for DVVSet was a client-server system like a distr
 
     ```Erlang
         %% create a new DVVSet for the new value V
-        NewDVVSet = new(V),
+        NewDVVSet = dvvset:new(V),
         %% update the causal history of DVVSet using the server identifier
-        DVVSet = update(NewDVVSet, ServerID),
+        DVVSet = dvvset:update(NewDVVSet, ServerID),
         %% store DVVSet...
     ```
 
@@ -124,11 +124,11 @@ The major use case we thought for DVVSet was a client-server system like a distr
 
     ```Erlang
         %% synchronize from different server DVVSet
-        DVVSet = sync(ListOfDVVSet),
+        DVVSet = dvvset:sync(ListOfDVVSet),
         %% get the value(s)
-        Val = values(DVVSet),
+        Val = dvvset:values(DVVSet),
         %% get the causal information (version vector)
-        VV = join(DVVSet),
+        VV = dvvset:join(DVVSet),
         %% return both to client...
     ```
 
@@ -136,9 +136,9 @@ The major use case we thought for DVVSet was a client-server system like a distr
 
     ```Erlang
         %% create a new DVVSet for the new value V, using the client's version vector VV
-        NewDVVSet = new(VV, V),
+        NewDVVSet = dvvset:new(VV, V),
         %% update the new DVVSet with the local server DVVSet and the server ID
-        DVVSet = update(NewDVVSet, LocalDVVSet, ServerID),
+        DVVSet = dvvset:update(NewDVVSet, LocalDVVSet, ServerID),
         %% store DVVSet...
     ```
 
@@ -146,7 +146,7 @@ The major use case we thought for DVVSet was a client-server system like a distr
 
     ```Erlang
         %% synchronize the new DVVSet with the local DVVSet
-        DVVSet = sync(NewDVVSet, LocalDVVSet),
+        DVVSet = dvvset:sync([NewDVVSet, LocalDVVSet]),
         %% store DVVSet...
     ```
 
@@ -154,11 +154,11 @@ The major use case we thought for DVVSet was a client-server system like a distr
 
     ```Erlang
         %% test if the local DVVSet is causally newer than the remote DVVSet
-        case less(NewDVVSet, LocalDVVSet) of
+        case dvvset:less(NewDVVSet, LocalDVVSet) of
             %% we already have the newest DVVSet so do nothing
             true  -> do_nothing;
             %% reconcile both and write locally the resulting DVVSet
-            false -> DVVSet = sync(NewDVVSet, LocalDVVSet),
+            false -> DVVSet = dvvset:sync([NewDVVSet, LocalDVVSet]),
                      %% store DVVSet...
         end.
     ```
@@ -167,12 +167,12 @@ The major use case we thought for DVVSet was a client-server system like a distr
 
     ```Erlang
         %% create a new DVVSet for the new value, using the client's version vector
-        NewDVVSet = new(VV, V),
+        NewDVVSet = dvvset:new(VV, V),
         %% update the new DVVSet with the local server DVVSet and the server ID
-        UpdDVVSet = update(NewDVVSet, LocalDVVSet, ServerID),
+        UpdDVVSet = dvvset:update(NewDVVSet, LocalDVVSet, ServerID),
         %% preserve the causal information of UpdDVVSet, but keep only 1 value 
         %% according to the ordering function F
-        DVVSet = lww(F, UpdDVVSet)
+        DVVSet = dvvset:lww(F, UpdDVVSet)
         %% store DVVSet...
     ```
     We could do only `DVVSet = new(V)` and write DVVSet immediately, saving the cost of a local read, but generally its safer to preserve causal information, especially if the *lww* policy can be turn on and off per request or changed during a key lifetime;
