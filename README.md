@@ -21,8 +21,8 @@ Therefore, this data structure abstracts the process of tracking and reasoning a
 
 ## Why not Version Vectors (Vector Clocks)?
 
-First, [Version Vectors are not Vector Clocks][blog VV are not VC]. We are targeting Version Vectors (VV) in this case. Specifically, VV are not suited to support conflicting values. When using VV, we couple a value to a VV, and if we try to reconcile two values using their VV, sometimes we have conflicts and want to keep both values. In this situation, want to do with their VV? We have a couple of options: (#1) keep both values and both VV; (#2) keep both values and merge their VV.
-Let's analyze each option with an example with one server, one client (or multiple, since it does does not matter in this case) reading and writing to a single key-value.
+First, [Version Vectors are not Vector Clocks][blog VV are not VC]. We are targeting Version Vectors (VV) in this case. Specifically, VV are not suited to support conflicting values. When using VV, we map a value to a VV, and if we try to reconcile two values using their VV, sometimes we have conflicts and want to keep both values. In this situation, want to do with their VV? We have a couple of options: (#1) keep both values and both VV; (#2) keep both values and merge their VV.
+Let's analyze each option with an example with one server and two clients reading and writing to a single key.
 
 
 #### Approach #1 - **Keep both**:
@@ -42,7 +42,7 @@ Another solution is to keep both values and merge their VV into one, which saves
 
 ![VV with conflicts #2][VV 2]
 
-**Problem**: We lose the information that *v2* was associated with (A,2) and not (A,3). In the third write we can see how this approach could lead to **false conflicts**. *v3* is being written with (A,1), therefore we know that it should win over *v1* and conflict with *v3*, but since we lost information about the causal past of *v1*, the server has no other option but to keep all three values and merge the VV again. Now the problem is even worse, since we are saying that all three values are related to (A,3). It's easy to see that this could lead to undesired behavior and an explosion of false conflicts.
+**Problem**: We lose the information that *v1* was associated with (A,1) and not (A,2). In the third write we can see how this approach could lead to **false conflicts**. *v3* is being written with (A,1), therefore we know that it should win over *v1* and conflict with *v2*, but since we lost information about the causal past of *v1*, the server has no other option but to keep all three values and merge the VV again. Now the problem is even worse, since we are saying that all three values are related to (A,3). It's easy to see that this could lead to undesired behavior and an explosion of false conflicts.
 
 
 
@@ -86,24 +86,25 @@ Here is an (Erlang) example using `reconcile`:
 ```Erlang
     F = fun (L) -> lists:sum(L) end,
     DVVSet = {[{a,4,[5,2]}, {b,1,[]}], [10,1]},
-    Res = reconcile(F, DVVSet),
+    Res = dvvset:reconcile(F, DVVSet),
     {[{a,4,[]}, {b,1,[]}], [18]} = Res.
 ```
 
 We pass to `reconcile` a function that adds all values. The returning DVVSet has the same causal information, but now has only one value (18), which was not present in the previous DVVSet. Thus, we store it in the anonymous list.
 
-There is a special case of reconcile, named **last-write-wins** (lww), where we also want to reduce all values to a single one, but that value *must* be already present in the DVVSet. Thus, we let the winning value stay in the same triplet as it was before. This function named `lww` has the same parameters as `reconcile`, but the function now takes two values and returns true if the first is newer than the second, or false otherwise. Using `lww`, it is impossible to have two DVVSet comparing equal and having different values.
+There is a special case of reconcile, named **last-write-wins** (lww), where we also want to reduce all values to a single one, but that value *must* be already present in the DVVSet. Thus, we let the winning value stay in the same triplet as it was before. This function named `lww` has the same parameters as `reconcile`, but the function is a **less or equal** [ordering function][ord fun], from which we keep the greater value of all (*note*: we preemptively discard values in a triplet that are not the last, meaning we only take the head of the list in each triplet). Thus, `Fun(A,B)` returns `true` if A compares less than or equal to B, `false` otherwise. 
+Using `lww`, it is impossible to have two DVVSet comparing equal and having different values (provided that the ordering function used is the same).
 
-Here is an (Erlang) example of `lww`:
+Here is an (Erlang) example of using `lww` in a DVVSet with values types `{Value, Timestamp}`:
 
 ```Erlang
-    F = fun (A,B) -> A > B end,
-    DVVSet = {[{a,4,[5,2]}, {b,1,[1]}], [3]},
-    Res = lww(F, DVVSet),
-    {[{a,4,[5]},{b,1,[]}],[]} = Res.
+    Fun = fun ({_,TS1}, {_,TS2}) -> TS1 =< TS2 end,
+    DVVSet = {[{a,4,[{5, 1002345}, {7, 1002340}]}, {b,1,[{4, 1001340}]}], [{2, 1001140}]},
+    Res = dvvset:lww(Fun, DVVSet),
+    {[{a,4,[{5, 1002345}]}, {b,1,[]}], []} = Res.
 ```
 
-We use a function that simply picks the highest value between two values, and use it to sort out which value is the "latest" according to this function. Naturally, in this case it is value 5. Notice how it stay in its original triplet instead of going to anonymous list.
+We define a *less or equal* function for our type of values and use it in `lww`, which return a DVVSet with the same causal information, but only with the *greatest* value remaining. Naturally, in this case it's {5, 1002345}, which has the highest timestamp. Notice how the *winning* value stays in its original triplet instead of going to anonymous list, unlike `reconcile`.
 
 
 ## How to use
@@ -114,7 +115,7 @@ The major use case we thought for DVVSet was a client-server system like a distr
 
     ```Erlang
         %% create a new DVVSet for the new value V
-        NewDVVSet = dvvset:new(V),
+        NewDVVSet = dvvset:new([V]),
         %% update the causal history of DVVSet using the server identifier
         DVVSet = dvvset:update(NewDVVSet, ServerID),
         %% store DVVSet...
@@ -136,7 +137,7 @@ The major use case we thought for DVVSet was a client-server system like a distr
 
     ```Erlang
         %% create a new DVVSet for the new value V, using the client's version vector VV
-        NewDVVSet = dvvset:new(VV, V),
+        NewDVVSet = dvvset:new(VV, [V]),
         %% update the new DVVSet with the local server DVVSet and the server ID
         DVVSet = dvvset:update(NewDVVSet, LocalDVVSet, ServerID),
         %% store DVVSet...
@@ -167,7 +168,7 @@ The major use case we thought for DVVSet was a client-server system like a distr
 
     ```Erlang
         %% create a new DVVSet for the new value, using the client's version vector
-        NewDVVSet = dvvset:new(VV, V),
+        NewDVVSet = dvvset:new(VV, [V]),
         %% update the new DVVSet with the local server DVVSet and the server ID
         UpdDVVSet = dvvset:update(NewDVVSet, LocalDVVSet, ServerID),
         %% preserve the causal information of UpdDVVSet, but keep only 1 value 
@@ -175,7 +176,7 @@ The major use case we thought for DVVSet was a client-server system like a distr
         DVVSet = dvvset:lww(F, UpdDVVSet)
         %% store DVVSet...
     ```
-    We could do only `DVVSet = new(V)` and write DVVSet immediately, saving the cost of a local read, but generally its safer to preserve causal information, especially if the *lww* policy can be turn on and off per request or changed during a key lifetime;
+    We could do only `DVVSet = dvvset:new([V])` and write DVVSet immediately, saving the cost of a local read, but generally its safer to preserve causal information, especially if the *lww* policy can be turn on and off per request or changed during a key lifetime;
 
 
 
@@ -195,5 +196,6 @@ Feel free to clone it and confirm that *It Works (TM)* :) (don't forget to turn 
 [DVVSet1]: images/DVVS1.png
 [DVVSet2]: images/DVVS2.png
 [DVVSet3]: images/DVVS3.png
+[ord fun]: http://www.erlang.org/doc/man/lists.html#ordering_function
 [riak site]: http://basho.com/
 [riak github]: https://github.com/basho/riak
