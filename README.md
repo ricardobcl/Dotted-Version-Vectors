@@ -6,8 +6,8 @@
 - Intro
 - Why not Version Vectors (Vector Clocks)?
 - The Solution: Dotted Version Vector Sets
-- How to use
 - Real World with Riak
+- How to Use
 
 ## Intro
 
@@ -107,9 +107,96 @@ Here is an (Erlang) example of using `lww` in a DVVSet with values types `{Value
 We define a *less or equal* function for our type of values and use it in `lww`, which return a DVVSet with the same causal information, but only with the *greatest* value remaining. Naturally, in this case it's {5, 1002345}, which has the highest timestamp. Notice how the *winning* value stays in its original triplet instead of going to anonymous list, unlike `reconcile`.
 
 
-## How to use
 
-The major use case we thought for DVVSet was a client-server system like a distributed database. So here are the common uses of DVVSet to implement in that case:
+## Real World with Riak
+
+We implemented DVVSet in our fork of [Basho's][riak site] [Riak][riak github] NoSQL database, in favor of their VV implementation, as a proof of concept.
+
+The Riak version using VV is here: https://github.com/ricardobcl/riak_kv/tree/master
+The Riak version using DVVset is here: https://github.com/ricardobcl/riak_kv/tree/dvvset
+
+Lets take a look at 2 different scenarios, where we can clearly see real world advantages of DVVSet:
+
+* **Scenario 1**
+    1. client C1 writes and reads;
+    2. some other client writes a new value (without causal information);
+    3. repeat 1 and 2.
+
+Version Vector:
+![VV with conflicts #4][VV 4]
+
+Dotted Version Vector Set:
+![Dotted Version Vector Set #4][DVVSet4]
+
+* **Scenario 2**
+    1. client A writes and reads;
+    2. client B writes and reads;
+    3. repeat 1 and 2.
+
+Version Vector:
+![VV with conflicts #5][VV 5]
+
+Dotted Version Vector Set:
+![Dotted Version Vector Set #5][DVVSet5]
+
+These are two usage patterns where the traditional VV degenerates, while DVVSet behaves well. Lets see this done multiple times with a real Riak instance storing values:
+
+```Erlang
+$ erlc sib.erl; erl sib -pa ebin deps/*/ebin
+Erlang R15B02 (erts-5.9.2) [source] [64-bit] [smp:4:4] [async-threads:0] [hipe] [kernel-poll:false] [dtrace]
+
+Eshell V5.9.2  (abort with ^G)
+
+1> %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+1> %% Using riak with Version Vectors %%
+1> %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+1>
+1> %%%%%%%%%%%%%%%%%%%%%%%%%% Scenario 1
+1> sib:run1(101).
+
+Siblings: 101
+Values: v79 v10 v18 v34 v61 v68 v45 v1 v25 v30 v19 v55 v63 v29 v53 v89 v90 v49 v14 v67 v36 v65 v31 v27 v91 v72 v2 v86 v99 v11 v21 v20 v85 v22 v71 v3 v26 v7 v59 v93 v57 v40 v17 v9 v77 v4 v41 v62 v80 v33 v43 v54 v76 v37 v98 v92 v15 v56 v16 v66 v60 v46 v48 v52 v5 v13 v44 v8 v32 v101 v70 v69 v97 v28 v73 v50 v83 v6 v42 v51 v75 v81 v74 v100 v64 v12 v88 v94 v78 v47 v82 v95 v96 v23 v35 v39 v87 v24 v58 v38 v84!
+
+ok
+2> %%%%%%%%%%%%%%%%%%%%%%%%%% Scenario 2
+2> sib:run2(101).
+
+Siblings: 101
+Values: v32 v75 v49 v19 v83 v50 v72 v1 v33 v22 v14 v26 v92 v64 v9 v86 v37 v85 v16 v17 v99 v43 v24 v47 v56 v11 v87 v52 v67 v94 v35 v81 v95 v6 v28 v27 v8 v20 v10 v100 v53 v97 v13 v62 v38 v93 v55 v34 v31 v74 v5 v3 v54 v25 v59 v84 v12 v76 v23 v42 v36 v39 v58 v45 v73 v78 v96 v66 v51 v48 v41 v80 v71 v101 v79 v57 v30 v7 v68 v77 v82 v65 v15 v89 v63 v40 v18 v91 v60 v21 v29 v70 v46 v98 v4 v2 v69 v90 v88 v61 v44!
+
+ok
+
+
+
+3> %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+3> %% Swith to riak with DVVSet %%
+3> %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+3>
+3> %%%%%%%%%%%%%%%%%%%  Scenario 1
+3> sib:run1(101).
+
+Siblings: 2
+Values: v101 v100!
+
+ok
+4> %%%%%%%%%%%%%%%%%%%% Scenario 2
+4> sib:run2(101).
+
+Siblings: 2
+Values: v101 v100!
+
+ok
+4>
+```
+
+The code can be found here: https://gist.github.com/ricardobcl/4992839
+
+As we can see, both scenarios have similar results: with VV you have an exploding number of siblings in your Riak database; with DVVSet you have always 2 or 3 siblings.
+
+
+## How to Use
+
+The major use case that DVVSet targets is a client-server system like a distributed database. So here are the common uses of DVVSet to implement in that case:
 
 1. **A client writes a new value**
 
@@ -180,79 +267,19 @@ The major use case we thought for DVVSet was a client-server system like a distr
 
 
 
-## Real World with Riak
 
-We implemented DVVSet in our fork of [Basho's][riak site] [Riak][riak github] NoSQL database, in favor of their VV implementation, as a proof of concept. 
-You can view it here: https://github.com/ricardobcl/riak_kv/tree/dvvset
-
-Lets take a look at 2 different scenarios, where we can clearly see real world advantages of DVVSet:
-
-* **Scenario 1**
-    1. client A writes and reads;
-    2. some other client writes a new value (without causal information);
-    3. repeat 1 and 2.
-
-* **Scenario 2**
-    1. client A writes and reads;
-    1. client B writes and reads;
-    3. repeat 1 and 2.
-
-These are two patterns use cases where the traditional VV degenerates, while DVVSet does well. Lets see some actual code:
-
-```bash
-$ erlc sib.erl; erl sib -pa ebin deps/*/ebin
-Erlang R15B02 (erts-5.9.2) [source] [64-bit] [smp:4:4] [async-threads:0] [hipe] [kernel-poll:false] [dtrace]
-
-Eshell V5.9.2  (abort with ^G)
-
-1> % Using riak with Version Vectors
-1>
-1> % Scenario 1
-1> sib:run1(101).
-
-Siblings: 101
-Values: v79 v10 v18 v34 v61 v68 v45 v1 v25 v30 v19 v55 v63 v29 v53 v89 v90 v49 v14 v67 v36 v65 v31 v27 v91 v72 v2 v86 v99 v11 v21 v20 v85 v22 v71 v3 v26 v7 v59 v93 v57 v40 v17 v9 v77 v4 v41 v62 v80 v33 v43 v54 v76 v37 v98 v92 v15 v56 v16 v66 v60 v46 v48 v52 v5 v13 v44 v8 v32 v101 v70 v69 v97 v28 v73 v50 v83 v6 v42 v51 v75 v81 v74 v100 v64 v12 v88 v94 v78 v47 v82 v95 v96 v23 v35 v39 v87 v24 v58 v38 v84!
-
-ok
-2> % Scenario 2
-2> sib:run2(101).
-
-Siblings: 101
-Values: v32 v75 v49 v19 v83 v50 v72 v1 v33 v22 v14 v26 v92 v64 v9 v86 v37 v85 v16 v17 v99 v43 v24 v47 v56 v11 v87 v52 v67 v94 v35 v81 v95 v6 v28 v27 v8 v20 v10 v100 v53 v97 v13 v62 v38 v93 v55 v34 v31 v74 v5 v3 v54 v25 v59 v84 v12 v76 v23 v42 v36 v39 v58 v45 v73 v78 v96 v66 v51 v48 v41 v80 v71 v101 v79 v57 v30 v7 v68 v77 v82 v65 v15 v89 v63 v40 v18 v91 v60 v21 v29 v70 v46 v98 v4 v2 v69 v90 v88 v61 v44!
-
-ok
-
-3>
-3> % Swith to riak with DVVSet
-3>
-3> % Scenario 1
-3> sib:run1(101).
-
-Siblings: 2
-Values: v101 v100!
-
-ok
-4> % Scenario 2
-4> sib:run2(101).
-
-Siblings: 2
-Values: v101 v100!
-
-ok
-4> 
-```
-
-The code can be found here: https://gist.github.com/ricardobcl/4992839
-
-As we can see, both cases have equal results: with VV you have an exploding number of siblings in your Riak database; with DVVSet you have always 2 or 3 siblings.
 
 [paper dvv]: http://gsd.di.uminho.pt/members/vff/dotted-version-vectors-2012.pdf
 [blog VV are not VC]: http://haslab.wordpress.com/2011/07/08/version-vectors-are-not-vector-clocks
 [VV 1]: images/VV1.png
 [VV 2]: images/VV2.png
+[VV 4]: images/VV4.png
+[VV 5]: images/VV5.png
 [DVVSet1]: images/DVVS1.png
 [DVVSet2]: images/DVVS2.png
 [DVVSet3]: images/DVVS3.png
+[DVVSet4]: images/DVVS4.png
+[DVVSet5]: images/DVVS5.png
 [ord fun]: http://www.erlang.org/doc/man/lists.html#ordering_function
 [riak site]: http://basho.com/
 [riak github]: https://github.com/basho/riak
