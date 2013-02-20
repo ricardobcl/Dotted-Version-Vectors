@@ -1,17 +1,17 @@
 # Dotted Version Vector Sets - Managing Values with Causality
 
-**TL;DR** Dotted Version Vector Sets are similar to Version Vectors (Vector Clocks for some), but with a better API and are more well suited to distributed use cases, such has distributed databases. It also prevents false conflicts that occur with Version Vectors.
+**TL;DR** Dotted Version Vector Sets are similar to Version Vectors (Vector Clocks for some), but prevent false conflicts that can occur with Version Vectors. I also has a better API and is better suited to distributed use cases, such has distributed databases (has shown below).
 
 ### Summary
 - Intro
 - Why not Version Vectors (Vector Clocks)?
 - The Solution: Dotted Version Vector Sets
 - How to use
-- Real World Use Case (Riak)
+- Real World with Riak
 
 ## Intro
 
-We are presenting the **compact** version of the original [Dotted Version Vectors][paper dvv], which we call **Dotted Version Vector Set (DVVSet)**. It provides a container for sets of conflicting values with causal order information.
+We are presenting the **compact** version of the original [Dotted Version Vectors][paper dvv], which we call **Dotted Version Vector Set (DVVSet)**. It provides a container for a set of conflicting values with causal order information.
 
 Let's assume the scenario of a Distributed Key-Value Storage (Ex: Riak, Cassandra, etc), where the entities are the clients and the replicas, and we can also **PUT** (write a value) and **GET** (read a value).
 
@@ -180,14 +180,71 @@ The major use case we thought for DVVSet was a client-server system like a distr
 
 
 
-## Real World Use Case
+## Real World with Riak
 
 We implemented DVVSet in our fork of [Basho's][riak site] [Riak][riak github] NoSQL database, in favor of their VV implementation, as a proof of concept. 
-
 You can view it here: https://github.com/ricardobcl/riak_kv/tree/dvvset
 
-Feel free to clone it and confirm that *It Works (TM)* :) (don't forget to turn on the flag *allow_mult*) 
+Lets take a look at 2 different scenarios, where we can clearly see real world advantages of DVVSet:
 
+* **Scenario 1**
+    1. client A writes and reads;
+    2. some other client writes a new value (without causal information);
+    3. repeat 1 and 2.
+
+* **Scenario 2**
+    1. client A writes and reads;
+    1. client B writes and reads;
+    3. repeat 1 and 2.
+
+These are two patterns use cases where the traditional VV degenerates, while DVVSet does well. Lets see some actual code:
+
+```bash
+$ erlc sib.erl; erl sib -pa ebin deps/*/ebin
+Erlang R15B02 (erts-5.9.2) [source] [64-bit] [smp:4:4] [async-threads:0] [hipe] [kernel-poll:false] [dtrace]
+
+Eshell V5.9.2  (abort with ^G)
+
+1> % Using riak with Version Vectors
+1>
+1> % Scenario 1
+1> sib:run1(101).
+
+Siblings: 101
+Values: v79 v10 v18 v34 v61 v68 v45 v1 v25 v30 v19 v55 v63 v29 v53 v89 v90 v49 v14 v67 v36 v65 v31 v27 v91 v72 v2 v86 v99 v11 v21 v20 v85 v22 v71 v3 v26 v7 v59 v93 v57 v40 v17 v9 v77 v4 v41 v62 v80 v33 v43 v54 v76 v37 v98 v92 v15 v56 v16 v66 v60 v46 v48 v52 v5 v13 v44 v8 v32 v101 v70 v69 v97 v28 v73 v50 v83 v6 v42 v51 v75 v81 v74 v100 v64 v12 v88 v94 v78 v47 v82 v95 v96 v23 v35 v39 v87 v24 v58 v38 v84!
+
+ok
+2> % Scenario 2
+2> sib:run2(101).
+
+Siblings: 101
+Values: v32 v75 v49 v19 v83 v50 v72 v1 v33 v22 v14 v26 v92 v64 v9 v86 v37 v85 v16 v17 v99 v43 v24 v47 v56 v11 v87 v52 v67 v94 v35 v81 v95 v6 v28 v27 v8 v20 v10 v100 v53 v97 v13 v62 v38 v93 v55 v34 v31 v74 v5 v3 v54 v25 v59 v84 v12 v76 v23 v42 v36 v39 v58 v45 v73 v78 v96 v66 v51 v48 v41 v80 v71 v101 v79 v57 v30 v7 v68 v77 v82 v65 v15 v89 v63 v40 v18 v91 v60 v21 v29 v70 v46 v98 v4 v2 v69 v90 v88 v61 v44!
+
+ok
+
+3>
+3> % Swith to riak with DVVSet
+3>
+3> % Scenario 1
+3> sib:run1(101).
+
+Siblings: 2
+Values: v101 v100!
+
+ok
+4> % Scenario 2
+4> sib:run2(101).
+
+Siblings: 2
+Values: v101 v100!
+
+ok
+4> 
+```
+
+The code can be found here: https://gist.github.com/ricardobcl/4992839
+
+As we can see, both cases have equal results: with VV you have an exploding number of siblings in your Riak database; with DVVSet you have always 2 or 3 siblings.
 
 [paper dvv]: http://gsd.di.uminho.pt/members/vff/dotted-version-vectors-2012.pdf
 [blog VV are not VC]: http://haslab.wordpress.com/2011/07/08/version-vectors-are-not-vector-clocks

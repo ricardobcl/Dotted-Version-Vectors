@@ -190,7 +190,8 @@ values({C,Vs}) -> Vs ++ lists:append([L || {_,_,L} <- C]).
 %% @doc Compares the equality of both clocks, regarding
 %% only the causal histories, thus ignoring the values.
 -spec equal(clock(), clock()) -> boolean().
-equal({C1,_},{C2,_}) -> equal2(C1,C2).
+equal({C1,_},{C2,_}) -> equal2(C1,C2); % DVVSet
+equal(C1,C2) when is_list(C1) and is_list(C2) -> equal2(C1,C2). %vector clocks
 
 %% Private function
 -spec equal2(vector(), vector()) -> boolean().
