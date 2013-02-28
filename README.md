@@ -1,6 +1,6 @@
 # Dotted Version Vector Sets - Managing Values with Causality
 
-**TL;DR** Dotted Version Vector Sets are similar to Version Vectors (Vector Clocks for some), but prevent false conflicts that can occur with Version Vectors. I also has a better API and is better suited to distributed use cases, such has distributed databases (has shown below).
+**TL;DR** Dotted Version Vector Sets are similar to Version Vectors (Vector Clocks for some), but prevent false conflicts that can occur with Version Vectors use with a small number of site ids. I also has a more complete API and is better suited to distributed databases with a get/put interface (has shown below).
 
 ### Contents
 
@@ -12,18 +12,18 @@
 
 ## Intro
 
-We are presenting the **compact** version of the original [Dotted Version Vectors][paper dvv](DVV), which we call **Dotted Version Vector Set (DVVSet)**. Like its predecessor, DVVSet still accurately describes causality between conflicting values (values we cannot decide through their causal history, which one to keep), but now with a smaller representation, similar to Version Vectors in size.
+We are presenting the **compact** version of the original [Dotted Version Vectors][paper dvv](DVV), which we call **Dotted Version Vector Set (DVVSet)**. Like its predecessor, DVVSet still accurately describes causality between related or conflicting values (values that reflect concurrent updates and that must be all kept until a future reconciliation superseeds them), but now with a smaller representation, very similar to Version Vectors in size.
 
-Let's assume the scenario of a Distributed Key-Value Storage (Ex: Riak, Cassandra, etc), where we have clients, servers and we can write (**PUT**) and read (**GET**) values. We also want to track the causality information of these values.
+Let's assume the scenario of a Distributed Key-Value Storage (Ex: Riak, Cassandra, etc), where we have clients, servers and we can write (**PUT**) and read (**GET**) values. We also want to track the causality information of these values, so that causally descendent values replace older values and causally concurrent values are all kept.
 
-We can use DVVSet to keep values and their causal history together, with support for multiples conflicting values. One DVVSet has 1 value if there are no conflicts. Otherwise, it stores all conflicting values and their relevant causal information, all in a single DVVSet. Thus, this data structure encapsulates the process of *tracking*, *maintaining* and *reasoning* about values' causality.
+We can use DVVSet to keep the values and their causal history together, with support for multiple conflicting (sibling) values. One DVVSet has 1 value (a single sibling) if there are no conflicts. Otherwise, it stores all conflicting values and their relevant causal information, all in a single DVVSet. Thus, this data structure encapsulates the process of *tracking*, *maintaining* and *reasoning* about the values' causality.
 
 
 ## Why not Version Vectors (Vector Clocks)?
 
 First, [Version Vectors are not Vector Clocks][blog VV are not VC], both have similar structure but different semantics. In this context, the relevant mechanism is *Version Vectors (VV)*.
 
-Every key/value has an associated VV and sometimes conflicts arise, because values for the same key have conflicting VV (there isn't a single VV that dominates all others). Considering that we want to keep all conflicting values until something (a conflict resolution algorithm) or someone (the user) decides hot to reconcile. The question is: **How do we represent conflicts in the server?**
+Every key/value has an associated VV and sometimes conflicts arise, because values for the same key can reflect concurrent updates and thus have conflicting VVs (there isn't a single VV that dominates all others). Considering that we want to keep all conflicting values until something (a conflict resolution algorithm) or someone (the user) decides how to reconcile, the question is: **How do we represent conflicts in the server?**
 
 ### Client IDs vs Server IDs
 
@@ -31,8 +31,8 @@ There are two different approaches when using VV or similar causality tracking m
 
 VV need identifiers to track the *entities* responsible for the events. We can either make the servers *responsible* for events to a value (SI), or we can make clients responsible (CI).
 
-A **false conflict** occurs when a set of values contains values that *should* be discard, if the causality were correctly preserved. 
-VV with CI don't have false conflicts like VV with SI. However, they don't scale well. On the other hand, VV with SI scale, but don't have a good support for conflicting values.
+A **false conflict** occurs when a set of values contains values that *should* be discard, if the causality were correctly preserved, as they are related in a causal evolution chain and do not contain concurrent updates. 
+VVs with CI don't have false conflicts like VVs with SI. However, they don't scale well. On the other hand, VV with SI scale, but don't have a good support for the identification of conflicting values.
 
 
 ### Client/Server Example
@@ -42,22 +42,22 @@ Lets illustrate the different VV approaches to track events in a simple client/s
 
 #### Client IDs
 
-Using VV with CI, you don't have any problem representing conflicts in the server, because each write is associated with the client that did it. We can see that *v3* correctly superseded *v1*, thus no false conflict occurred.
+Using VV with CI, you don't have any problem representing conflicts in the server, because each write is associated with the client that did it (one has as many IDs as the potential sources of concurrent wites). We can see that *v3* correctly superseded *v1*, thus no false conflict occurred.
 
 ![VV Client IDs #1][VV 1]
 
-**Problem**: If 1000 different clients write to a key/value, its VV will have 1000 `(client_id, counter)` entries. We could prune older entries when a limit is reached, to bound growth and improve scalability, but it would introduce false conflict problems. Additionally, the same client could write to different servers and each would have the same VV, although being different writes. We could combine the identifier to be a pair `client_id/server_id`, but that would actually worsen the VV growth problem even more.
+**Problem**: If 1000 different clients write to a key/value, its VV will have 1000 `(client_id, counter)` entries. We could prune older entries when a limit is reached, to bound growth and improve scalability, but it would introduce false conflict problems (showing causally related values as concurrent). Additionally, the same client could write to different servers and, if R/W quorum setup do not ensure read-your-writes session guaranties, each could end up with the same VV, although depicting different writes. We could combine the identifier to be a pair `client_id/server_id`, but that would actually worsen the VV growth problem even more.
 
 
 #### Server IDs #1 - Keep VV Separated
 
-Using SI, you could keep both VV when conflicts occur, but you would consume more space. More importantly, VV are not sufficient to represent conflicts created by two "concurrent writes".
+Using SI, you could keep both VVs when conflicts occur, but you would consume more space. More importantly, VV are not sufficient to represent conflicts created by two "concurrent writes".
 
 ![VV Server IDs #1][VV 2]
 
 **Problem**: As we can see, there is no way for VV-SI to represent two conflicting values, since we can only increment the VV with the server id: if we use (A,1) for both, we are saying that they are causally equal, which is not true; using (A,2) implies that *v2* is causally newer than *v1*, which is also not true. If we assume (A,1) for both values *v1* and *v2*, we then have an additional problem where the behavior is undefined or incorrect: in the 3rd write, we receive a value that read *v1* ~ (A,1), so it should conflict with *v2* and overwrite *v1*; however, when writing *v2*, we did not increment its VV to (A,2), thus the new write *v3* wins over (A,1) and overwrites both *v1* and *v2*.
 
-A possible solution could be to use some **metadata** to tell us how the values came from and how to deal with conflicting values, but it would not be straightforward and would be full of corner cases and prone to bugs. We should not put the burden on the developer to implement causal behaviors of conflicting values on top of VV.
+A possible solution could be to use some **metadata** to tell us where the values came from and how to deal with conflicting values, but it would not be straightforward and would be full of corner cases and prone to bugs. We should not put the burden on the developer to implement proper causal behavior for conflicting values on top of VV.
 
 
 #### Server IDs #2 - Merge VV
@@ -72,7 +72,7 @@ Another solution is to keep both values and merge their VV into one, which saves
 
 ## The Solution: Dotted Version Vectors (Sets)
 
-The problems described above are the reasons that made us develop the original *Dotted Version Vectors (DVV)* in the first place. It uses *Server Ids* but without the problems stated above.
+The problems described above are the reasons that made us develop the original *Dotted Version Vectors (DVV)* in the first place. It uses *Server Ids* but without the problems stated above, and allowing precise causality tracking.
 Lets give a brief explanation about DVV. 
 
 ### The Origin: Dotted Version Vectors (DVV)
@@ -85,8 +85,8 @@ Using this, we solve the problem we presented earlier:
 ![Dotted Version Vectors][DVV]
 
 A DVV has a VV and a *Dot*. On the first write, since *v1* had no causal context, the VV in the DVV is also empty. The *Dot* captures the last event, which in this case, is `(A,1)`.
-When *v2* is written, it also doesn't have causal history, so the DVV also has a empty VV. Since we are writing to server A, and event 1 by A has already occurred, *v2* is then event 2, thus the Dot cebomes `(A,2)`. Both values coexist without confusing and preserving their background. 
-Finally, when *v3* arrives with a context of `(A,1)`, we know that it already read *v1*, thus it can be safely discarded. We keep *v2* because it has events that *v3* does not know. The DVV for *v3* is the VV given by the client, and the *Dot* is the next available event by A : `(A,3)`.
+When *v2* is written, it also doesn't have causal history, so the DVV also has a empty VV. Since we are writing to server A, and event 1 by A has already occurred, *v2* is then event 2, thus the Dot becomes `(A,2)`. Both values coexist without confusing and preserving their background. 
+Finally, when *v3* arrives with a context of `(A,1)`, we know that it already read *v1*, thus it can be safely discarded. We keep *v2* because it has events (updates) that *v3* does not know. The DVV for *v3* is the VV given by the client, and the *Dot* is the next available event by A : `(A,3)`.
 
 We have solved this problem by allowing values to "know" non-contiguous set of events (however, all DVVs combined should have a set of contiguous events).
 
@@ -112,7 +112,7 @@ So, we have 2 *Dot*s and one global VV. Taking it a step further, we can use imp
 ![Dot 3][Dot 3]
 
 meaning that `(A,1)` is the global VV and `[v2,v3]` are the *Dot*s. Their position is what gives us the exact *Dot* for each one. *v2* is the first element, so we add 1 to the global VV and have the *Dot* `(A,2)`. *v3* is second element, so we add 2 to the global VV and have the *Dot* `(A,3)`. 
-Well, actually for implementation purposes, it more practical to have the VV as the whole set of events and the list of values reversed. Our example becomes:
+Well, actually, for implementation purposes, it is more practical to have the VV as the whole set of events and the list of values reversed. Our example becomes:
 
 `(A,3,[v3,v2])`
 ![Dot 4][Dot 4]
@@ -126,7 +126,7 @@ Now, let's see how DVVSet would manage in our previous example:
 
 ![Dotted Version Vector Set][DVVSet 1]
 
-We have a compact representation like approach VV with SI #2, while preserving sufficient per value causality information to infer that *v1* could be discard, since in the 3rd write already knows the causal information associated with *v1*.
+We have a compact representation like the approach based on VV with SI #2, while preserving sufficient per value causality information to infer that *v1* could be discard, since it can detect that the 3rd write already knows the causal information associated with *v1*, and thus can replace it.
 
 #### The Anonymous List (AL)
 
@@ -134,8 +134,7 @@ We actually simplified the DVVSet structure a bit for explanation purposes. The 
 
 ##### Reconcile
 
-But, why do we need or want this list? Sometimes we want to simplify values into a single value. For example, apply a conflict resolution algorithm. 
-`reconcile` is a function that receives a DVVSet and another function. The latter receives a list of values and returns a new value (the *winner*). the result can be a completely new value (one that was not created directly by a client event in the server), we store it in the AL. 
+But, why do we need or want this list? Sometimes we want to simplify values into a single value. For example, applying a conflict resolution algorithm, like those deterministic reconciliations captured in Conflict Free Replicated Data Types (CRDTs). `reconcile` is a function that receives a DVVSet and another function. The latter receives a list of values and returns a new value (the *winner*). the result can be a completely new value (one that was not created directly by a client event in the server), we store it in the AL. 
 It could be dangerous store it as a *Dot*, since subsequent synchronizations or comparisons with this clock could be unsafe (for example, two DVVSet could be causally equal, but have different values, thus one of them could be incorrectly thrown away).
 
 Here is an (Erlang) example using `reconcile`:
@@ -180,14 +179,14 @@ In the example, `join` gives the VV `(A,3)` and `values` gives the list of value
 ![Dotted Version Vector Set in a PUT][DVVSet put]
 
 When a client wants to write to a key/value, he gives a value and a VV. We first create a new DVVSet to represent the new write, using `new`. It returns a DVVSet with that VV inside and the new value in the AL.
-The we call a function `update` on that new DVVSet and the server's DVVSet. It synchronizes both to discard old values on the server. In this case, *v1* is outdated because the client VV already knows (A,1), therefore we discard it.
+Then we call a function `update` on that new DVVSet and the server's DVVSet. It synchronizes both to discard old values on the server. In this case, *v1* is outdated because the client VV already knows (A,1), therefore we discard it.
 After this, we advance the causal information in DVVSet and insert a new *Dot* to reflect the new event. In the example, we advance the VV from `(A,2)` to `(A,3)` and create a *Dot* for *v3*.
 
 
 
 ## Real World with Riak
 
-We implemented DVVSet in our fork of [Basho's][riak site] [Riak][riak github] NoSQL database, in favor of their VV implementation, as a proof of concept.
+We implemented DVVSet in our fork of [Basho's][riak site] [Riak][riak github] NoSQL database, as an alternative to their VV implementation, as a proof of concept.
 
 The Riak version using VV is here: https://github.com/ricardobcl/riak_kv/tree/master
 The Riak version using DVVset is here: https://github.com/ricardobcl/riak_kv/tree/dvvset
@@ -267,7 +266,7 @@ As we can see, both scenarios have similar results: with VV you have an explodin
 
 ## How to Use
 
-The major use case that DVVSet targets is a client-server system like a distributed database. So here are the common uses of DVVSet to implement in that case:
+The major use case that DVVSet targets is a client-server system over a distributed database. So here are the common uses of DVVSet to implement in that case:
 
 1. **A client writes a new value**
 
@@ -334,7 +333,7 @@ The major use case that DVVSet targets is a client-server system like a distribu
         DVVSet = dvvset:lww(F, UpdDVVSet)
         %% store DVVSet...
     ```
-    We could do only `DVVSet = dvvset:new([V])` and write DVVSet immediately, saving the cost of a local read, but generally its safer to preserve causal information, especially if the *lww* policy can be turn on and off per request or changed during a key lifetime;
+    We could do only `DVVSet = dvvset:new([V])` and write DVVSet immediately, saving the cost of a local read, but generally its safer to preserve causal information, especially if the *lww* policy can be turned on and off per request or changed during a key lifetime;
 
 
 
