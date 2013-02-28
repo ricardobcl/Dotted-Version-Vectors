@@ -12,9 +12,9 @@
 
 ## Intro
 
-We are presenting the **compact** version of the original [Dotted Version Vectors][paper dvv](DVV), which we call **Dotted Version Vector Set (DVVSet)**. Like its predecessor, DVVSet still accurately describes causality between related or conflicting values (values that reflect concurrent updates and that must be all kept until a future reconciliation superseeds them), but now with a smaller representation, very similar to Version Vectors in size.
+We are presenting the **compact** version of the original [Dotted Version Vectors][paper dvv](DVV), which we call **Dotted Version Vector Set (DVVSet)**. Like its predecessor, DVVSet still accurately describes causality between related or conflicting values (values that reflect concurrent updates and that must be all kept until a future reconciliation supersedes them), but now with a smaller representation, very similar to Version Vectors in size.
 
-Let's assume the scenario of a Distributed Key-Value Storage (Ex: Riak, Cassandra, etc), where we have clients, servers and we can write (**PUT**) and read (**GET**) values. We also want to track the causality information of these values, so that causally descendent values replace older values and causally concurrent values are all kept.
+Let's assume the scenario of a Distributed Key-Value Storage (Ex: Riak, Cassandra, etc), where we have clients, servers and we can write ( **PUT** ) and read ( **GET** ) values. We also want to track the causality information of these values, so that causally descendant values replace older values and causally concurrent values are all kept.
 
 We can use DVVSet to keep the values and their causal history together, with support for multiple conflicting (sibling) values. One DVVSet has 1 value (a single sibling) if there are no conflicts. Otherwise, it stores all conflicting values and their relevant causal information, all in a single DVVSet. Thus, this data structure encapsulates the process of *tracking*, *maintaining* and *reasoning* about the values' causality.
 
@@ -42,7 +42,7 @@ Lets illustrate the different VV approaches to track events in a simple client/s
 
 #### Client IDs
 
-Using VV with CI, you don't have any problem representing conflicts in the server, because each write is associated with the client that did it (one has as many IDs as the potential sources of concurrent wites). We can see that *v3* correctly superseded *v1*, thus no false conflict occurred.
+Using VV with CI, you don't have any problem representing conflicts in the server, because each write is associated with the client that did it (one has as many IDs as the potential sources of concurrent writes). We can see that *v3* correctly superseded *v1*, thus no false conflict occurred.
 
 ![VV Client IDs #1][VV 1]
 
@@ -223,40 +223,26 @@ Erlang R15B02 (erts-5.9.2) [source] [64-bit] [smp:4:4] [async-threads:0] [hipe] 
 
 Eshell V5.9.2  (abort with ^G)
 
-1> %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-1> %% Using riak with Version Vectors %%
-1> %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-1>
-1> %%%%%%%%%%%%%%%%%%%%%%%%%% Scenario 1
+1> %% Riak with Version Vectors ; Scenario 1
 1> sib:run1(101).
-
 Siblings: 101
 Values: v79 v10 v18 v34 v61 v68 v45 v1 v25 v30 v19 v55 v63 v29 v53 v89 v90 v49 v14 v67 v36 v65 v31 v27 v91 v72 v2 v86 v99 v11 v21 v20 v85 v22 v71 v3 v26 v7 v59 v93 v57 v40 v17 v9 v77 v4 v41 v62 v80 v33 v43 v54 v76 v37 v98 v92 v15 v56 v16 v66 v60 v46 v48 v52 v5 v13 v44 v8 v32 v101 v70 v69 v97 v28 v73 v50 v83 v6 v42 v51 v75 v81 v74 v100 v64 v12 v88 v94 v78 v47 v82 v95 v96 v23 v35 v39 v87 v24 v58 v38 v84!
 
-2> %%%%%%%%%%%%%%%%%%%%%%%%%% Scenario 2
+2> %% Riak with Version Vectors ; Scenario 2
 2> sib:run2(101).
-
 Siblings: 101
 Values: v32 v75 v49 v19 v83 v50 v72 v1 v33 v22 v14 v26 v92 v64 v9 v86 v37 v85 v16 v17 v99 v43 v24 v47 v56 v11 v87 v52 v67 v94 v35 v81 v95 v6 v28 v27 v8 v20 v10 v100 v53 v97 v13 v62 v38 v93 v55 v34 v31 v74 v5 v3 v54 v25 v59 v84 v12 v76 v23 v42 v36 v39 v58 v45 v73 v78 v96 v66 v51 v48 v41 v80 v71 v101 v79 v57 v30 v7 v68 v77 v82 v65 v15 v89 v63 v40 v18 v91 v60 v21 v29 v70 v46 v98 v4 v2 v69 v90 v88 v61 v44!
 
 
-3> %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-3> %% Swith to riak with DVVSet %%
-3> %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-3>
-3> %%%%%%%%%%%%%%%%%%%  Scenario 1
+3> %% Riak with DVVSet ; Scenario 1
 3> sib:run1(101).
-
 Siblings: 2
 Values: v101 v100!
 
-4> %%%%%%%%%%%%%%%%%%%% Scenario 2
+4> %% Riak with DVVSet ; Scenario 2
 4> sib:run2(101).
-
 Siblings: 2
 Values: v101 v100!
-
-4>
 ```
 
 The code can be found here: https://gist.github.com/ricardobcl/4992839
