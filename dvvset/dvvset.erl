@@ -63,8 +63,8 @@
 %%      * each counter() also includes the number of values in that id()
 %%      * the values in each triple of entries() are causally ordered and each new value goes to the head of the list
 
--opaque clock() :: {entries(), values()}.
--opaque vector() :: [{id(), counter()}].
+-type clock() :: {entries(), values()}.
+-type vector() :: [{id(), counter()}].
 -type entries() :: [{id(), counter(), values()}].
 -type id() :: any().
 -type values() :: [value()].
@@ -189,14 +189,16 @@ values({C,Vs}) -> Vs ++ lists:append([L || {_,_,L} <- C]).
 
 %% @doc Compares the equality of both clocks, regarding
 %% only the causal histories, thus ignoring the values.
--spec equal(clock(), clock()) -> boolean().
+-spec equal(clock() | vector(), clock() | vector()) -> boolean().
 equal({C1,_},{C2,_}) -> equal2(C1,C2); % DVVSet
 equal(C1,C2) when is_list(C1) and is_list(C2) -> equal2(C1,C2). %vector clocks
 
 %% Private function
 -spec equal2(vector(), vector()) -> boolean().
 equal2([], []) -> true;
-equal2([{I, C, L1} | T1], [{I, C, L2} | T2]) when length(L1) == length(L2) -> equal2(T1, T2);
+equal2([{I, C, L1} | T1], [{I, C, L2} | T2]) 
+    when length(L1) =:= length(L2) -> 
+    equal2(T1, T2);
 equal2(_, _) -> false.
 
 %% @doc Returns True if the first clock is causally older than

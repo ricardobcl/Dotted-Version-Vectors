@@ -1,3 +1,4 @@
 
-erlang/*.beam
+dvvset/*.beam
+dvv/*.beam
 .DS_Store
