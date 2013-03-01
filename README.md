@@ -134,8 +134,9 @@ We actually simplified the DVVSet structure a bit for explanation purposes. The 
 
 ##### Reconcile
 
-But, why do we need or want this list? Sometimes we want to simplify values into a single value. For example, applying a conflict resolution algorithm, like those deterministic reconciliations captured in Conflict Free Replicated Data Types (CRDTs). `reconcile` is a function that receives a DVVSet and another function. The latter receives a list of values and returns a new value (the *winner*). the result can be a completely new value (one that was not created directly by a client event in the server), we store it in the AL. 
-It could be dangerous store it as a *Dot*, since subsequent synchronizations or comparisons with this clock could be unsafe (for example, two DVVSet could be causally equal, but have different values, thus one of them could be incorrectly thrown away).
+But, why do we need or want this list? Sometimes we want to simplify values into a single value. For example, applying a deterministic conflict resolution algorithm, like the reconciliations captured in [Conflict Free Replicated Data Types (CRDTs)][paper crdt]. 
+`reconcile` is a function that receives a DVVSet and another function. The latter receives a list of values and returns a new value (the *winner*). The result can be a completely new value (one that was not created directly by a client event in the server), thus we don't advance the causal history, and instead store it in the AL. Also, the function that return the new value should be **deterministic**! If not, we can have inconsistent DVVSets. For example, applying `reconcile` with a non-deterministic function to two replicas could yield two different values with the same causal history. This is dangerous and is a similar situation to VV with SI #1, where we keep equal VVs for different values.
+We also don't store the new value in a preexistent *Dot*, since writes that read pre-`reconcile` values would supersede this new value.
 
 Here is an (Erlang) example using `reconcile`:
 
@@ -189,6 +190,7 @@ After this, we advance the causal information in DVVSet and insert a new *Dot* t
 We implemented DVVSet in our fork of [Basho's][riak site] [Riak][riak github] NoSQL database, as an alternative to their VV implementation, as a proof of concept.
 
 The Riak version using VV is here: https://github.com/ricardobcl/riak_kv/tree/master
+
 The Riak version using DVVset is here: https://github.com/ricardobcl/riak_kv/tree/dvvset
 
 Lets take a look at 2 different scenarios, where we can clearly see real world advantages of DVVSet:
@@ -226,23 +228,23 @@ Eshell V5.9.2  (abort with ^G)
 1> %% Riak with Version Vectors ; Scenario 1
 1> sib:run1(101).
 Siblings: 101
-Values: v79 v10 v18 v34 v61 v68 v45 v1 v25 v30 v19 v55 v63 v29 v53 v89 v90 v49 v14 v67 v36 v65 v31 v27 v91 v72 v2 v86 v99 v11 v21 v20 v85 v22 v71 v3 v26 v7 v59 v93 v57 v40 v17 v9 v77 v4 v41 v62 v80 v33 v43 v54 v76 v37 v98 v92 v15 v56 v16 v66 v60 v46 v48 v52 v5 v13 v44 v8 v32 v101 v70 v69 v97 v28 v73 v50 v83 v6 v42 v51 v75 v81 v74 v100 v64 v12 v88 v94 v78 v47 v82 v95 v96 v23 v35 v39 v87 v24 v58 v38 v84!
+Values: v79 v10 v18 v34 v61 v68 v45 v1 v25 v30 v19 v55 v63 v29 v53 v89 v90 v49 v14 v67 v36 v65 v31 v27 v91 v72 v2 v86 v99 v11 v21 v20 v85 v22 v71 v3 v26 v7 v59 v93 v57 v40 v17 v9 v77 v4 v41 v62 v80 v33 v43 v54 v76 v37 v98 v92 v15 v56 v16 v66 v60 v46 v48 v52 v5 v13 v44 v8 v32 v101 v70 v69 v97 v28 v73 v50 v83 v6 v42 v51 v75 v81 v74 v100 v64 v12 v88 v94 v78 v47 v82 v95 v96 v23 v35 v39 v87 v24 v58 v38 v84
 
 2> %% Riak with Version Vectors ; Scenario 2
 2> sib:run2(101).
 Siblings: 101
-Values: v32 v75 v49 v19 v83 v50 v72 v1 v33 v22 v14 v26 v92 v64 v9 v86 v37 v85 v16 v17 v99 v43 v24 v47 v56 v11 v87 v52 v67 v94 v35 v81 v95 v6 v28 v27 v8 v20 v10 v100 v53 v97 v13 v62 v38 v93 v55 v34 v31 v74 v5 v3 v54 v25 v59 v84 v12 v76 v23 v42 v36 v39 v58 v45 v73 v78 v96 v66 v51 v48 v41 v80 v71 v101 v79 v57 v30 v7 v68 v77 v82 v65 v15 v89 v63 v40 v18 v91 v60 v21 v29 v70 v46 v98 v4 v2 v69 v90 v88 v61 v44!
+Values: v32 v75 v49 v19 v83 v50 v72 v1 v33 v22 v14 v26 v92 v64 v9 v86 v37 v85 v16 v17 v99 v43 v24 v47 v56 v11 v87 v52 v67 v94 v35 v81 v95 v6 v28 v27 v8 v20 v10 v100 v53 v97 v13 v62 v38 v93 v55 v34 v31 v74 v5 v3 v54 v25 v59 v84 v12 v76 v23 v42 v36 v39 v58 v45 v73 v78 v96 v66 v51 v48 v41 v80 v71 v101 v79 v57 v30 v7 v68 v77 v82 v65 v15 v89 v63 v40 v18 v91 v60 v21 v29 v70 v46 v98 v4 v2 v69 v90 v88 v61 v44
 
 
 3> %% Riak with DVVSet ; Scenario 1
 3> sib:run1(101).
 Siblings: 2
-Values: v101 v100!
+Values: v101 v100
 
 4> %% Riak with DVVSet ; Scenario 2
 4> sib:run2(101).
 Siblings: 2
-Values: v101 v100!
+Values: v101 v100
 ```
 
 The code can be found here: https://gist.github.com/ricardobcl/4992839
@@ -326,6 +328,7 @@ The major use case that DVVSet targets is a client-server system over a distribu
 
 
 [paper dvv]: http://gsd.di.uminho.pt/members/vff/dotted-version-vectors-2012.pdf
+[paper crdt]: http://hal.inria.fr/docs/00/61/73/41/PDF/RR-7687.pdf
 [blog VV are not VC]: http://haslab.wordpress.com/2011/07/08/version-vectors-are-not-vector-clocks
 [VV 1]: images/VV1.png
 [VV 2]: images/VV2.png
