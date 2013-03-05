@@ -1,6 +1,6 @@
 # Dotted Version Vector Sets - Managing Values with Causality
 
-**TL;DR** Dotted Version Vector Sets are similar to Version Vectors (Vector Clocks for some), but prevent false conflicts that can occur with Version Vectors use with a small number of site ids. I also has a more complete API and is better suited to distributed databases with a get/put interface (has shown below).
+**TL;DR** Dotted Version Vector Sets are similar to Version Vectors (Vector Clocks for some), but prevent false conflicts that can occur with Version Vectors. It also has a more complete API and is better suited to distributed databases with a get/put interface (has shown below).
 
 ### Contents
 
@@ -217,7 +217,7 @@ Lets take a look at 2 different scenarios, where we can clearly see real world a
     Dotted Version Vector Set:
 ![Dotted Version Vector Set #5][DVVSet 3]
 
-These are two usage patterns where the traditional VV degenerates, while DVVSet behaves well. Lets see this done multiple times with a real Riak instance storing values:
+These are two patterns where traditional VV degenerates badly, while DVVSet behaves well. Lets run these scenarios for some time, writing to real Riak nodes:
 
 ```Erlang
 $ erlc sib.erl; erl sib -pa ebin deps/*/ebin
@@ -247,7 +247,7 @@ Siblings: 2
 Values: v101 v100
 ```
 
-The code can be found here: https://gist.github.com/ricardobcl/4992839
+The test code can be found here: https://gist.github.com/ricardobcl/4992839
 
 As we can see, both scenarios have similar results: with VV you have an exploding number of siblings in your Riak database; with DVVSet you have always 2 or 3 siblings.
 
