@@ -159,7 +159,7 @@ update({C,[V]}, I) -> {event(C, I, V), []}.
 %% the new value in the *anonymous dot* while
 %% the second clock is from the local server.
 -spec update(clock(), clock(), id()) -> clock().
-update({Cc,[V]}, Cr, I) -> 
+update({Cc,[V]}, Cr, I) ->
     %% Sync both clocks without the new value
     {C,Vs} = sync({Cc,[]}, Cr),
     %% We create a new event on the synced causal history,
@@ -168,7 +168,7 @@ update({Cc,[V]}, Cr, I) ->
     {event(C, I, V), Vs}.
 
 %% Private function
--spec event(vector(), id(), value()) -> vector().
+-spec event(vector(), id(), value()) -> entries().
 event([], I, V) -> [{I, 1, [V]}];
 event([{I, N, L} | T], I, V) -> [{I, N+1, [V | L]} | T];
 event([{I1, _, _} | _]=C, I, V) when I1 > I -> [{I, 1, [V]} | C];
@@ -334,15 +334,15 @@ sync_test() ->
     W   = {[{a,1,[]}],[]},
     Z   = {[{a,2,[v2,v1]}],[]},
     ?assertEqual( sync([W,Z])     , {[{a,2,[v2]}],[]}                         ),
-    ?assertEqual( sync([W,Z])     , sync([Z,W])                                 ),
-    ?assertEqual( sync([A,A1])    , sync([A1,A])                                ),
+    ?assertEqual( sync([W,Z])     , sync([Z,W])                               ),
+    ?assertEqual( sync([A,A1])    , sync([A1,A])                              ),
     ?assertEqual( sync([A4,A3])   , sync([A3,A4])                             ),
     ?assertEqual( sync([A4,A3])   , {[{a,2,[]}, {b,1,[v3]}, {c,1,[v3]}],[]}   ),
     ?assertEqual( sync([X,A])     , {[{a,1,[v1]},{x,1,[]}],[]}                ),
-    ?assertEqual( sync([X,A])     , sync([A,X])                                 ),
+    ?assertEqual( sync([X,A])     , sync([A,X])                               ),
     ?assertEqual( sync([X,A])     , sync([A,X])                               ),
     ?assertEqual( sync([A,Y])     , {[{a,1,[v1]},{b,1,[v2]}],[]}              ),
-    ?assertEqual( sync([Y,A])     , sync([A,Y])                                 ),
+    ?assertEqual( sync([Y,A])     , sync([A,Y])                               ),
     ?assertEqual( sync([Y,A])     , sync([A,Y])                               ),
     ?assertEqual( sync([A,X])     , sync([X,A])                               ),
     ?assertEqual( lww(F,A4)     , sync([A4,lww(F,A4)])                        ),
@@ -426,7 +426,7 @@ equal_test() ->
     ok.
 
 size_test() ->
-    ?assertEqual( 1 , ?MODULE:size(new([v1]))                                         ),
+    ?assertEqual( 1 , ?MODULE:size(new([v1]))                                       ),
     ?assertEqual( 5 , ?MODULE:size({[{a,4,[v5,v0]},{b,0,[]},{c,1,[v3]}],[v4,v1]})   ),
     ok.
 
