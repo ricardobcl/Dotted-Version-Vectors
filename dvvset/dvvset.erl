@@ -63,12 +63,12 @@
 %%      * each counter() also includes the number of values in that id()
 %%      * the values in each triple of entries() are causally ordered and each new value goes to the head of the list
 
--type clock() :: {entries(), values()}.
--type vector() :: [{id(), counter()}].
+-type clock()   :: {entries(), values()}.
+-type vector()  :: [{id(), counter()}].
 -type entries() :: [{id(), counter(), values()}].
--type id() :: any().
--type values() :: [value()].
--type value() :: any().
+-type id()      :: any().
+-type values()  :: [value()].
+-type value()   :: any().
 -type counter() :: non_neg_integer().
 
 
@@ -349,14 +349,14 @@ sync_test() ->
     ok.
 
 syn_update_test() ->
-    A0  = update(new([v1]), a),              % Mary writes v1 w/o VV
-    VV1 = join(A0),                        % Peter reads v1 with version vector (VV)
-    A1  = update(new([v2]), A0, a),          % Mary writes v2 w/o VV
-    A2  = update(new(VV1,[v3]), A1, a),      % Peter writes v3 with VV from v1
+    A0  = update(new([v1]), a),             % Mary writes v1 w/o VV
+    VV1 = join(A0),                         % Peter reads v1 with version vector (VV)
+    A1  = update(new([v2]), A0, a),         % Mary writes v2 w/o VV
+    A2  = update(new(VV1,[v3]), A1, a),     % Peter writes v3 with VV from v1
     ?assertEqual( VV1 , [{a,1}]                          ),
     ?assertEqual( A0  , {[{a,1,[v1]}],[]}                ),
     ?assertEqual( A1  , {[{a,2,[v2,v1]}],[]}             ),
-    %% now A2 should only have v2 and v3, since v3 was causally newer than v1
+    % now A2 should only have v2 and v3, since v3 was causally newer than v1
     ?assertEqual( A2  , {[{a,3,[v3,v2]}],[]}             ),
     ok.
 
