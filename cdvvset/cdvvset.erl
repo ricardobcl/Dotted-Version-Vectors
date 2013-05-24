@@ -4,8 +4,8 @@
 %%% File:      dvvset.erl
 %%%
 %%% @title Dotted Version Vector Set
-%%% @author    Ricardo Tomé Gonçalves <tome.wave@gmail.com>
-%%% @author    Paulo Sérgio Almeida <pssalmeida@gmail.com>
+%%% @author    Ricardo TomÃ© GonÃ§alves <tome.wave@gmail.com>
+%%% @author    Paulo SÃ©rgio Almeida <pssalmeida@gmail.com>
 %%%
 %%% @copyright The MIT License (MIT)
 %%% Copyright (C) 2013
@@ -32,7 +32,7 @@
 %%%
 %%%-------------------------------------------------------------------
 
--module(dvvset).
+-module(cdvvset).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -40,6 +40,7 @@
 
 -export([new/1,
          new/2,
+         new_list/2,
          sync/1,
          join/1,
          update/2,
@@ -55,7 +56,7 @@
          reconcile/2
         ]).
 
--export_type([clock/0, vector/0, id/0, value/0]).
+-export_type([clock/0, causal/0, id/0, value/0]).
 
 % % @doc
 %% STRUCTURE details:
@@ -63,9 +64,13 @@
 %%      * each counter() also includes the number of values in that id()
 %%      * the values in each triple of entries() are causally ordered and each new value goes to the head of the list
 
--type clock()   :: {entries(), anonym()}.
--type entries() :: [{id(), counter(), dots()}].
--type dots()    :: [{counter(), value()} | counter()].
+-type clock()   :: {[entry()], anonym()}.
+-type entries() :: [entry()].
+-type entry()   :: {id(), counter(), dots(), values()}.
+-type causal()  :: [{id(), counter(), dots()}].
+-type dots()    :: [counter()].
+-type values()  :: [{counter(), value()}].
+-type anonym()  :: [value()].
 -type id()      :: any().
 -type value()   :: any().
 -type counter() :: non_neg_integer().
@@ -81,11 +86,17 @@ new(V) -> {[], [V]}.
 %% of the given version vector / vector clock,
 %% and receives a list of values that gos to the anonymous list.
 %% The version vector SHOULD BE a direct result of join/1.
--spec new(clock(), [value()]) -> clock().
-new(C, Vs) when is_list(Vs) ->
-    {lists:sort(C), Vs};
-new(VV, V) ->
-    {lists:sort(C), [Vs]}.
+-spec new_list(causal(), [value()]) -> clock().
+new_list(Causal, Vs) when is_list(Vs) ->
+    C2 = lists:sort(Causal),
+    Clock = [{I,C,D,[]} || {I,C,D} <- C2],
+    {Clock, Vs}.
+
+-spec new(causal(), value()) -> clock().
+new(Causal, V) ->
+    C2 = lists:sort(Causal),
+    Clock = [{I,C,D,[]} || {I,C,D} <- C2],
+    {Clock, [V]}.
 
 %% @doc Synchronizes a list of clocks using sync/2.
 %% It discards (causally) outdated values, 
@@ -97,6 +108,8 @@ sync(L) -> lists:foldl(fun sync/2, {}, L).
 -spec sync(clock(), clock()) -> clock().
 sync({}, C) -> C;
 sync(C ,{}) -> C;
+sync({E1,[]}, {E2,[]}) ->
+    {sync(E1,E2,[]),[]};
 sync(C1={E1,V1},C2={E2,V2}) ->
     V = case less(C1,C2) of
         true  -> V2; % C1 < C2 => return V2
@@ -106,47 +119,60 @@ sync(C1={E1,V1},C2={E2,V2}) ->
                         sets:to_list(sets:from_list(V1++V2))
                  end
     end,
-    {sync2(E1,E2),V}.
+    {sync(E1,E2,[]),V}.
 
 %% Private function
--spec sync2(entries(), entries()) -> entries().
-sync2([], C) -> C;
-sync2(C, []) -> C;
-sync2([{I1, N1, L1}=H1 | T1]=C1, [{I2, N2, L2}=H2 | T2]=C2) ->
+-spec sync(entries(), entries(), entries()) -> entries().
+sync([], E2, Acc) -> lists:reverse(Acc, E2);
+sync(E1, [], Acc) -> lists:reverse(Acc, E1);
+sync([{I1,_,_,_}=H1 | T1]=C1, [{I2,_,_,_}=H2 | T2]=C2, Acc) ->
     if
-      I1 < I2 -> [H1 | sync2(T1, C2)];
-      I1 > I2 -> [H2 | sync2(T2, C1)];
-      true    -> [merge(I1, N1, L1, N2, L2) | sync2(T1, T2)]
+      I1 < I2 -> sync(T1, C2, [H1 | Acc]);
+      I1 > I2 -> sync(T2, C1, [H2 | Acc]);
+      true    -> sync(T1, T2, [sync_dots(H1,H2) | Acc])
     end.
 
-%% Private function
--spec merge(id(), counter(), values(), counter(), values()) -> {id(), counter(), values()}.
-merge(I, N1, L1, N2, L2) ->
-    LL1 = length(L1),
-    LL2 = length(L2),
-    case N1 >= N2 of
-        true ->
-          case N1 - LL1 >=  N2 - LL2 of 
-            true  -> {I, N1, L1};
-            false -> {I, N1, lists:sublist(L1, N1 - N2 + LL2)}
-          end;
-        false ->
-          case N2 - LL2 >=  N1 - LL1 of 
-            true  -> {I, N2, L2};
-            false -> {I, N2, lists:sublist(L2, N2 - N1 + LL1)}
-          end
+-spec sync_dots(entry(), entry()) -> entry().
+sync_dots({I,C1,D1,V1}, {I,C2,D2,V2}) ->
+    C = max(C1,C2),
+    Dots = ordsets:union(D1, D2),
+    {Dots2, Values} = discard(C,Dots,V1),
+    {Dots3, Values2} = discard(C,Dots2,V2),
+    {C2, Dots4} = lift(C,Dots3),
+    {I, C2, Dots4, Values ++ Values2}.
+
+discard(C, D, L) -> discard(C, D, L, []).
+discard(_, D, [], Acc) -> {D, Acc};
+discard(C, D, [{Dot,Val}|T], Acc) ->
+    case Dot > C and (not ordsets:is_element(Dot, D)) of
+        true  -> discard(C, D, T, [{Dot,Val} | Acc]);
+        false -> discard(C, ordsets:add_element(Dot, D), T, Acc)
     end.
 
+-spec lift(counter(), dots()) -> {counter(), dots()}.
+lift(C, []) -> {C, []};
+lift(C, [H|T])
+    when H == C+1 -> lift(H, T);
+lift(C, D) -> {C, D}.
 
-%% @doc Return a version vector that represents the causal history.
--spec join(clock()) -> vector().
-join({C,_}) -> [{I, N} || {I, N, _} <- C].
+%% @doc Return a dvvset w/o values that represents the causal history.
+-spec join(clock()) -> causal().
+join({Entries,_}) ->
+    F = fun({I,C,D,V}) ->
+            Dots = ordsets:from_list([Dot || {Dot,_} <- V]),
+            D2 = ordsets:union(D,Dots),
+            {C1,D1} = lift(C,D2),
+            {I,C1,D1}
+        end,
+    [F(E) || E <- Entries].
 
 %% @doc Advances the causal history with the given id.
 %% The new value is the *anonymous dot* of the clock.
 %% The client clock SHOULD BE a direct result of new/2.
 -spec update(clock(), id()) -> clock().
-update({C,[V]}, I) -> {event(C, I, V), []}.
+update(C, I) ->
+    {E,[V]} = C,
+    {event(E, I, V), []}.
 
 %% @doc Advances the causal history of the
 %% first clock with the given id, while synchronizing
@@ -158,45 +184,61 @@ update({C,[V]}, I) -> {event(C, I, V), []}.
 %% the new value in the *anonymous dot* while
 %% the second clock is from the local server.
 -spec update(clock(), clock(), id()) -> clock().
-update({Cc,[V]}, Cr, I) ->
+update(C, S, I) ->
+    {E,[V]} = C,
     %% Sync both clocks without the new value
-    {C,Vs} = sync({Cc,[]}, Cr),
+    {C2,A} = sync({E,[]}, S),
     %% We create a new event on the synced causal history,
     %% with the id I and the new value.
     %% The anonymous values that were synced still remain.
-    {event(C, I, V), Vs}.
+    {event(C2, I, V), A}.
 
 %% Private function
--spec event(vector(), id(), value()) -> entries().
-event([], I, V) -> [{I, 1, [V]}];
-event([{I, N, L} | T], I, V) -> [{I, N+1, [V | L]} | T];
-event([{I1, _, _} | _]=C, I, V) when I1 > I -> [{I, 1, [V]} | C];
-event([H | T], I, V) -> [H | event(T, I, V)].
+-spec event(entries(), id(), value()) -> entries().
+event(C,I,V) -> 
+    event(C,I,V,[]).
+
+event([],I,V,Acc) -> 
+    lists:reverse([{I,0,[],[{1,V}]} | Acc]);
+event([H={I,C,D,V} | T], I, Val, Acc) ->
+    lists:reverse([{I,C,D,[{max_id(I,H)+1,Val}|V]} | Acc],T);
+event(C=[{I1,_,_,_} | _], I, V, Acc) 
+    when I1 > I -> 
+    lists:reverse(Acc, [{I,0,[],[{1,V}]} | C]);
+event([H | T], I, V, Acc) -> 
+    event(T, I, V, [H | Acc]).
+
+-spec max_id(id(), entry()) -> counter().
+max_id(I, {I,C,D,V}) ->
+    D2 = [Dot || {Dot,_} <- V],
+    lists:max([C | D] ++ D2).
 
 %% @doc Returns the total number of values in this clock set.
 -spec size(clock()) -> non_neg_integer().
-size({C,Vs}) -> lists:sum([length(L) || {_,_,L} <- C]) + length(Vs).
+size({C,Vs}) -> lists:sum([length(L) || {_,_,_,L} <- C]) + length(Vs).
 
 %% @doc Returns all the ids used in this clock set.
 -spec ids(clock()) -> [id()].
-ids({C,_}) -> ([I || {I,_,_} <- C]).
+ids({C,_}) -> ([I || {I,_,_,_} <- C]).
 
 %% @doc Returns all the values used in this clock set,
 %% including the anonymous values.
 -spec values(clock()) -> [value()].
-values({C,Vs}) -> Vs ++ lists:append([L || {_,_,L} <- C]).
+values({C,Vs}) -> Vs ++ lists:append([L || {_,_,_,L} <- C]).
 
 %% @doc Compares the equality of both clocks, regarding
 %% only the causal histories, thus ignoring the values.
--spec equal(clock() | vector(), clock() | vector()) -> boolean().
-equal({C1,_},{C2,_}) -> equal2(C1,C2); % DVVSet
-equal(C1,C2) when is_list(C1) and is_list(C2) -> equal2(C1,C2). %vector clocks
+-spec equal(clock(), clock()) -> boolean().
+equal({C1,_},{C2,_}) ->
+    length(C1) =:= length(C2) andalso equal2(C1,C2).
 
-%% Private function
--spec equal2(vector(), vector()) -> boolean().
 equal2([], []) -> true;
-equal2([{I, C, L1} | T1], [{I, C, L2} | T2]) 
-    when length(L1) =:= length(L2) -> 
+equal2([{I, C1, D1, V1} | T1], [{I, C2, D2, V2} | T2]) 
+    when length(V1) =:= length(V2) ->
+%    {C11,D11} = lift(C1,D1),
+%    {C22,D22} = lift(C2,D2),
+    C1 =:= C2 andalso
+    D1 =:= D2 andalso
     equal2(T1, T2);
 equal2(_, _) -> false.
 
@@ -207,25 +249,36 @@ equal2(_, _) -> false.
 less({C1,_}, {C2,_}) -> greater(C2, C1, false).
 
 %% Private function
--spec greater(vector(), vector(), boolean()) -> boolean().
+-spec greater(entries(), entries(), boolean()) -> boolean().
 greater([], [], Strict) -> Strict;
 greater([_|_], [], _) -> true;
 greater([], [_|_], _) -> false;
-greater([{I, N1, _} | T1], [{I, N2, _} | T2], Strict) ->
-   if
-     N1 == N2 -> greater(T1, T2, Strict);
-     N1 >  N2 -> greater(T1, T2, true);
-     N1 <  N2 -> false
-   end;
-greater([{I1, _, _} | T1], [{I2, _, _} | _]=C2, _) when I1 < I2 -> greater(T1, C2, true);
+greater([{I, C1, D1, _} | T1], [{I, C2, D2, _} | T2], Strict) ->
+    F = fun(C,D) ->
+            S = lists:seq(1,C),
+            ordsets:union(S,D)
+        end,
+    case C1 =:= C2 andalso D1 =:= D2 of
+        true ->
+            greater(T1, T2, Strict);
+        false ->
+            case ordsets:is_subset(F(C2,D2), F(C1,D1)) of
+                true ->
+                    greater(T1, T2, true);
+                false -> %C1 < C2
+                    false
+            end
+    end;
+greater([{I1, _, _, _} | T1], [{I2, _, _, _} | _]=C2, _) 
+    when I1 < I2 -> greater(T1, C2, true);
 greater(_, _, _) -> false.
 
 %% @doc Maps (applies) a function on all values in this clock set,
 %% returning the same clock set with the updated values.
 -spec map(fun((value()) -> value()), clock()) -> clock().
-map(F, {C,Vs}) -> 
-    {[ {I, N, lists:map(F, V)} || {I, N, V} <- C], lists:map(F, Vs)}.
-
+map(F, {E,Vs}) ->
+    F2 = fun({D,V}) -> {D,F(V)} end,
+    {[ {I,C,D,lists:map(F2,V)} || {I,C,D,V} <- E], lists:map(F, Vs)}.
 
 %% @doc Return a clock with the same causal history, but with only one
 %% value in the anonymous placeholder. This value is the result of
@@ -255,9 +308,12 @@ lww(F, C={E,_}) ->
     end.
 
 %% find_entry/2 - Private function
-find_entry(F, {[], [V|T]}) -> find_entry(F, null, V, {[],T}, anonym);
-find_entry(F, {[{_, _, []} | T], Vs}) -> find_entry(F, {T,Vs});
-find_entry(F, {[{I, _, [V|_]} | T], Vs}) -> find_entry(F, I, V, {T,Vs}, id).
+find_entry(F, {[], [V|T]}) -> 
+    find_entry(F, null, V, {[],T}, anonym);
+find_entry(F, {[{_,_,_,[]} | T], Vs}) -> 
+    find_entry(F, {T,Vs});
+find_entry(F, {[{I,_,_,[V|_]} | T], Vs}) -> 
+    find_entry(F, I, V, {T,Vs}, id).
 
 %% find_entry/5 - Private function
 find_entry(F, I, V, C, Flag) ->
@@ -277,20 +333,20 @@ find_entry2(F, I, V, {[], [V1 | T]}, Flag) ->
         {left,V2}  -> find_entry2(F, I, V2, {[],T}, Flag);
         {right,V2} -> find_entry2(F, I, V2, {[],T}, anonym)
     end;
-find_entry2(F, I, V, {[{_, _, []} | T], Vs}, Flag) -> find_entry2(F, I, V, {T, Vs}, Flag);
-find_entry2(F, I, V, {[{I1, _, [V1|_]} | T], Vs}, Flag) -> 
+find_entry2(F, I, V, {[{_,_,_,[]} | T], Vs}, Flag) -> find_entry2(F, I, V, {T, Vs}, Flag);
+find_entry2(F, I, V, {[{I1,_,_,[V1|_]} | T], Vs}, Flag) -> 
     case F(V, V1) of
         {left,V2}  -> find_entry2(F, I, V2, {T, Vs}, Flag);
         {right,V2} -> find_entry2(F, I1, V2, {T, Vs}, Flag)
     end.
 
 %% Private function
-join_and_replace(Ir, V, C) -> 
+join_and_replace(Ir, V, E) -> 
     [if
-       I == Ir -> {I, N, [V]};
-       true    -> {I, N, []}
+       I == Ir -> {I, C, D, [V]};
+       true    -> {I, C, D, []}
      end
-     || {I, N, _} <- C].
+     || {I, C, D, _} <- E].
 
 
 %% ===================================================================
