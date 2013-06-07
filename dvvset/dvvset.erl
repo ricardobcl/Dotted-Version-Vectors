@@ -361,7 +361,6 @@ prune_time1({[H|T],A}, TS, Acc) ->
 
 
 
-
 -define(DAYS_FROM_GREGORIAN_BASE_TO_EPOCH, (1970*365+478)).
 -define(SECONDS_FROM_GREGORIAN_BASE_TO_EPOCH,
     (?DAYS_FROM_GREGORIAN_BASE_TO_EPOCH * 24*60*60)
@@ -416,24 +415,24 @@ sync_test() ->
     F   = fun (L,R) -> L>R end,
     W   = {[{a,1,[],2}],[]},
     Z   = {[{a,2,[v2,v1],3}],[]},
-    ?assertMatch( {[{a,2,[v2],_}],[]}                           , sync([W,Z]) ),
+    ?assertMatch( {[{a,2,[v2],_}],[]}                           , sync([W,Z])   ),
     ?assertMatch( {[{a,2,[],_}, {b,1,[v3],_}, {c,1,[v3],_}],[]} , sync([A4,A3]) ),
-    ?assertMatch( {[{a,1,[v1],_},{x,1,[],_}],[]}                , sync([X,A]) ),
-    ?assertMatch( {[{a,1,[v1],_},{b,1,[v2],_}],[]}              , sync([A,Y]) ),
-    ?assertEqual( sync([W,Z])     , sync([Z,W])                               ),
-    ?assertEqual( sync([A,A1])    , sync([A1,A])                              ),
-    ?assertEqual( sync([A4,A3])   , sync([A3,A4])                             ),
-    ?assertEqual( sync([X,A])     , sync([A,X])                               ),
-    ?assertEqual( sync([X,A])     , sync([A,X])                               ),
-    ?assertEqual( sync([Y,A])     , sync([A,Y])                               ),
-    ?assertEqual( sync([Y,A])     , sync([A,Y])                               ),
-    ?assertEqual( sync([A,X])     , sync([X,A])                               ),
-    ?assertEqual( lww(F,A4)       , sync([A4,lww(F,A4)])                      ),
+    ?assertMatch( {[{a,1,[v1],_},{x,1,[],_}],[]}                , sync([X,A])   ),
+    ?assertMatch( {[{a,1,[v1],_},{b,1,[v2],_}],[]}              , sync([A,Y])   ),
+    ?assertEqual( sync([W,Z])     , sync([Z,W])                                 ),
+    ?assertEqual( sync([A,A1])    , sync([A1,A])                                ),
+    ?assertEqual( sync([A4,A3])   , sync([A3,A4])                               ),
+    ?assertEqual( sync([X,A])     , sync([A,X])                                 ),
+    ?assertEqual( sync([X,A])     , sync([A,X])                                 ),
+    ?assertEqual( sync([Y,A])     , sync([A,Y])                                 ),
+    ?assertEqual( sync([Y,A])     , sync([A,Y])                                 ),
+    ?assertEqual( sync([A,X])     , sync([X,A])                                 ),
+    ?assertEqual( lww(F,A4)       , sync([A4,lww(F,A4)])                        ),
     ok.
 
 sync_update_test() ->
     A0  = update(new(v1), a),             % Mary writes v1 w/o VV
-    VV1 = join(A0),                         % Peter reads v1 with version vector (VV)
+    VV1 = join(A0),                       % Peter reads v1 with version vector (VV)
     A1  = update(new(v2), A0, a),         % Mary writes v2 w/o VV
     A2  = update(new(VV1,v3), A1, a),     % Peter writes v3 with VV from v1
     ?assertMatch( [{a,1,_}]                 , VV1 ),
@@ -509,7 +508,7 @@ equal_test() ->
     ok.
 
 size_test() ->
-    ?assertEqual( 1 , ?MODULE:size(new(v1))                                       ),
+    ?assertEqual( 1 , ?MODULE:size(new(v1))                                               ),
     ?assertEqual( 5 , ?MODULE:size({[{a,4,[v5,v0],1},{b,0,[],1},{c,1,[v3],1}],[v4,v1]})   ),
     ok.
 
@@ -548,8 +547,8 @@ prune_time_test() ->
     ?assertEqual( {[{a,4,[v1],3},{b,0,[],5},{c,1,[],2}],[v10]}   , prune_time(A,2)),
     ?assertEqual( {[{a,4,[v1],3},{b,0,[],5}],[v10]}              , prune_time(A,3)),
     ?assertEqual( {[{a,4,[v1],3},{b,0,[],5}],[v10]}              , prune_time(A,4)),
-    ?assertEqual( {[{a,4,[v1],3}],[v10]}                          , prune_time(A,6)),
-    ?assertEqual( {[{a,4,[v1],3}],[v10]}                                     , prune_time(A,100)),
+    ?assertEqual( {[{a,4,[v1],3}],[v10]}                         , prune_time(A,6)),
+    ?assertEqual( {[{a,4,[v1],3}],[v10]}                         , prune_time(A,100)),
     ok.
 
 -endif.
