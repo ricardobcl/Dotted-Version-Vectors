@@ -40,6 +40,8 @@
 
 -export([new/1,
          new/2,
+         new_list/1,
+         new_list/2,
          sync/1,
          join/1,
          update/2,
@@ -52,10 +54,13 @@
          map/2,
          last/2,
          lww/2,
-         reconcile/2
+         reconcile/2,
+         prune_time/2,
+         prune_size/2,
+         timestamp/0
         ]).
 
--export_type([clock/0, vector/0, id/0, value/0]).
+-export_type([clock/0, vector/0, id/0, value/0, timestamp/0]).
 
 % % @doc
 %% STRUCTURE details:
@@ -63,30 +68,39 @@
 %%      * each counter() also includes the number of values in that id()
 %%      * the values in each triple of entries() are causally ordered and each new value goes to the head of the list
 
--type clock()   :: {entries(), values()}.
--type vector()  :: [{id(), counter()}].
--type entries() :: [{id(), counter(), values()}].
--type id()      :: any().
--type values()  :: [value()].
--type value()   :: any().
--type counter() :: non_neg_integer().
+-type clock()     :: {entries(), values()}.
+-type vector()    :: [{id(), counter(), timestamp()}].
+-type entries()   :: [{id(), counter(), values(), timestamp()}].
+-type id()        :: any().
+-type values()    :: [value()].
+-type value()     :: any().
+-type counter()   :: non_neg_integer().
+-type timestamp() :: pos_integer().
 
 
 %% @doc Constructs a new clock set without causal history,
 %% and receives a list of values that gos to the anonymous list.
--spec new([value()]) -> clock().
-new(Vs) when is_list(Vs) -> {[], Vs};
+-spec new(value()) -> clock().
 new(V) -> {[], [V]}.
+
+-spec new_list([value()]) -> clock().
+new_list(Vs) when is_list(Vs) -> {[], Vs};
+new_list(V) -> {[], [V]}.
 
 %% @doc Constructs a new clock set with the causal history
 %% of the given version vector / vector clock,
 %% and receives a list of values that gos to the anonymous list.
 %% The version vector SHOULD BE a direct result of join/1.
--spec new(vector(), [value()]) -> clock().
-new(VV, Vs) when is_list(Vs) ->
+-spec new(vector(), value()) -> clock().
+new(VV, V) ->
     VVS = lists:sort(VV), % defense against non-order preserving serialization
-    {[{I, N, []} || {I, N} <- VVS], Vs};
-new(VV, V) -> new(VV, [V]).
+    {[{I, N, [], T} || {I, N, T} <- VVS], [V]}.
+
+-spec new_list(vector(), [value()]) -> clock().
+new_list(VV, Vs) when is_list(Vs) ->
+    VVS = lists:sort(VV), % defense against non-order preserving serialization
+    {[{I, N, [], T} || {I, N, T} <- VVS], Vs};
+new_list(VV, V) -> new_list(VV, [V]).
 
 %% @doc Synchronizes a list of clocks using sync/2.
 %% It discards (causally) outdated values, 
@@ -113,35 +127,36 @@ sync(C1={E1,V1},C2={E2,V2}) ->
 -spec sync2(entries(), entries()) -> entries().
 sync2([], C) -> C;
 sync2(C, []) -> C;
-sync2([{I1, N1, L1}=H1 | T1]=C1, [{I2, N2, L2}=H2 | T2]=C2) ->
+sync2([{I1, N1, L1, TS1}=H1 | T1]=C1, [{I2, N2, L2, TS2}=H2 | T2]=C2) ->
     if
       I1 < I2 -> [H1 | sync2(T1, C2)];
       I1 > I2 -> [H2 | sync2(T2, C1)];
-      true    -> [merge(I1, N1, L1, N2, L2) | sync2(T1, T2)]
+      true    -> [merge(I1, N1, L1, TS1, N2, L2, TS2) | sync2(T1, T2)]
     end.
 
 %% Private function
--spec merge(id(), counter(), values(), counter(), values()) -> {id(), counter(), values()}.
-merge(I, N1, L1, N2, L2) ->
+-spec merge(id(), counter(), values(), timestamp(), counter(), values(), timestamp()) 
+    -> {id(), counter(), values(), timestamp()}.
+merge(I, N1, L1, TS1, N2, L2, TS2) ->
     LL1 = length(L1),
     LL2 = length(L2),
     case N1 >= N2 of
         true ->
           case N1 - LL1 >=  N2 - LL2 of 
-            true  -> {I, N1, L1};
-            false -> {I, N1, lists:sublist(L1, N1 - N2 + LL2)}
+            true  -> {I, N1, L1, TS1};
+            false -> {I, N1, lists:sublist(L1, N1 - N2 + LL2), TS1}
           end;
         false ->
           case N2 - LL2 >=  N1 - LL1 of 
-            true  -> {I, N2, L2};
-            false -> {I, N2, lists:sublist(L2, N2 - N1 + LL1)}
+            true  -> {I, N2, L2, TS2};
+            false -> {I, N2, lists:sublist(L2, N2 - N1 + LL1), TS2}
           end
     end.
 
 
 %% @doc Return a version vector that represents the causal history.
 -spec join(clock()) -> vector().
-join({C,_}) -> [{I, N} || {I, N, _} <- C].
+join({C,_}) -> [{I, N, T} || {I, N, _, T} <- C].
 
 %% @doc Advances the causal history with the given id.
 %% The new value is the *anonymous dot* of the clock.
@@ -169,23 +184,27 @@ update({Cc,[V]}, Cr, I) ->
 
 %% Private function
 -spec event(vector(), id(), value()) -> entries().
-event([], I, V) -> [{I, 1, [V]}];
-event([{I, N, L} | T], I, V) -> [{I, N+1, [V | L]} | T];
-event([{I1, _, _} | _]=C, I, V) when I1 > I -> [{I, 1, [V]} | C];
-event([H | T], I, V) -> [H | event(T, I, V)].
+event([], I, V) ->
+    [{I, 1, [V], timestamp()}];
+event([{I, N, L, _} | T], I, V) ->
+    [{I, N+1, [V | L], timestamp()} | T];
+event([{I1, _, _, _} | _]=C, I, V) when I1 > I ->
+    [{I, 1, [V], timestamp()} | C];
+event([H | T], I, V) ->
+    [H | event(T, I, V)].
 
 %% @doc Returns the total number of values in this clock set.
 -spec size(clock()) -> non_neg_integer().
-size({C,Vs}) -> lists:sum([length(L) || {_,_,L} <- C]) + length(Vs).
+size({C,Vs}) -> lists:sum([length(L) || {_,_,L,_} <- C]) + length(Vs).
 
 %% @doc Returns all the ids used in this clock set.
 -spec ids(clock()) -> [id()].
-ids({C,_}) -> ([I || {I,_,_} <- C]).
+ids({C,_}) -> ([I || {I,_,_,_} <- C]).
 
 %% @doc Returns all the values used in this clock set,
 %% including the anonymous values.
 -spec values(clock()) -> [value()].
-values({C,Vs}) -> Vs ++ lists:append([L || {_,_,L} <- C]).
+values({C,Vs}) -> Vs ++ lists:append([L || {_,_,L,_} <- C]).
 
 %% @doc Compares the equality of both clocks, regarding
 %% only the causal histories, thus ignoring the values.
@@ -196,7 +215,7 @@ equal(C1,C2) when is_list(C1) and is_list(C2) -> equal2(C1,C2). %vector clocks
 %% Private function
 -spec equal2(vector(), vector()) -> boolean().
 equal2([], []) -> true;
-equal2([{I, C, L1} | T1], [{I, C, L2} | T2]) 
+equal2([{I, C, L1, TS} | T1], [{I, C, L2, TS} | T2]) 
     when length(L1) =:= length(L2) -> 
     equal2(T1, T2);
 equal2(_, _) -> false.
@@ -212,20 +231,20 @@ less({C1,_}, {C2,_}) -> greater(C2, C1, false).
 greater([], [], Strict) -> Strict;
 greater([_|_], [], _) -> true;
 greater([], [_|_], _) -> false;
-greater([{I, N1, _} | T1], [{I, N2, _} | T2], Strict) ->
+greater([{I, N1, _, _} | T1], [{I, N2, _, _} | T2], Strict) ->
    if
      N1 == N2 -> greater(T1, T2, Strict);
      N1 >  N2 -> greater(T1, T2, true);
      N1 <  N2 -> false
    end;
-greater([{I1, _, _} | T1], [{I2, _, _} | _]=C2, _) when I1 < I2 -> greater(T1, C2, true);
+greater([{I1, _, _, _} | T1], [{I2, _, _, _} | _]=C2, _) when I1 < I2 -> greater(T1, C2, true);
 greater(_, _, _) -> false.
 
 %% @doc Maps (applies) a function on all values in this clock set,
 %% returning the same clock set with the updated values.
 -spec map(fun((value()) -> value()), clock()) -> clock().
 map(F, {C,Vs}) -> 
-    {[ {I, N, lists:map(F, V)} || {I, N, V} <- C], lists:map(F, Vs)}.
+    {[ {I, N, lists:map(F, V), T} || {I, N, V, T} <- C], lists:map(F, Vs)}.
 
 
 %% @doc Return a clock with the same causal history, but with only one
@@ -234,7 +253,7 @@ map(F, {C,Vs}) ->
 -spec reconcile(Winner::fun(([value()]) -> value()), clock()) -> clock().
 reconcile(F, C) ->
     V = F(values(C)),
-    new(join(C),[V]).
+    new(join(C),V).
 
 %% @doc Returns the latest value in the clock set,
 %% according to function F(A,B), which returns *true* if 
@@ -252,13 +271,14 @@ last(F, C) ->
 lww(F, C={E,_}) ->
     case find_entry(F, C) of
         {id, I, V}      -> {join_and_replace(I, V, E),[]};
-        {anonym, _, V}  -> new(join(C),[V])
+        {anonym, _, V}  -> new(join(C),V)
     end.
 
 %% find_entry/2 - Private function
+-spec find_entry(fun((value(),value()) -> boolean()), clock()) -> {id | anonym, id(), value()}.
 find_entry(F, {[], [V|T]}) -> find_entry(F, null, V, {[],T}, anonym);
-find_entry(F, {[{_, _, []} | T], Vs}) -> find_entry(F, {T,Vs});
-find_entry(F, {[{I, _, [V|_]} | T], Vs}) -> find_entry(F, I, V, {T,Vs}, id).
+find_entry(F, {[{_, _, [], _} | T], Vs}) -> find_entry(F, {T,Vs});
+find_entry(F, {[{I, _, [V|_], _} | T], Vs}) -> find_entry(F, I, V, {T,Vs}, id).
 
 %% find_entry/5 - Private function
 find_entry(F, I, V, C, Flag) ->
@@ -278,8 +298,8 @@ find_entry2(F, I, V, {[], [V1 | T]}, Flag) ->
         {left,V2}  -> find_entry2(F, I, V2, {[],T}, Flag);
         {right,V2} -> find_entry2(F, I, V2, {[],T}, anonym)
     end;
-find_entry2(F, I, V, {[{_, _, []} | T], Vs}, Flag) -> find_entry2(F, I, V, {T, Vs}, Flag);
-find_entry2(F, I, V, {[{I1, _, [V1|_]} | T], Vs}, Flag) -> 
+find_entry2(F, I, V, {[{_, _, [], _} | T], Vs}, Flag) -> find_entry2(F, I, V, {T, Vs}, Flag);
+find_entry2(F, I, V, {[{I1, _, [V1|_], _} | T], Vs}, Flag) -> 
     case F(V, V1) of
         {left,V2}  -> find_entry2(F, I, V2, {T, Vs}, Flag);
         {right,V2} -> find_entry2(F, I1, V2, {T, Vs}, Flag)
@@ -288,10 +308,73 @@ find_entry2(F, I, V, {[{I1, _, [V1|_]} | T], Vs}, Flag) ->
 %% Private function
 join_and_replace(Ir, V, C) -> 
     [if
-       I == Ir -> {I, N, [V]};
-       true    -> {I, N, []}
+       I == Ir -> {I, N, [V], T};
+       true    -> {I, N, [], T}
      end
-     || {I, N, _} <- C].
+     || {I, N, _, T} <- C].
+
+
+% %@doc Possibly shrink the size of a vclock, depending on current size.
+-spec prune_size(C::clock(), Max::integer()) -> clock().
+prune_size({C,A}, Max)
+    when Max >= length(C) -> {C,A};
+prune_size({C,A}, Max) ->
+    % This sort need to be deterministic, to avoid spurious merge conflicts later.
+    % We achieve this by using the ID as secondary key.
+    C2 = lists:sort(fun({I1,_,_,T1},{I2,_,_,T2}) -> {T1,I1} < {T2,I2} end, C),
+    prune_size1({C2,A}, length(C2) - Max, []).
+
+prune_size1({[],A}, 0, Acc) ->
+    {lists:sort(Acc), A};
+prune_size1({[],A}, N, Acc) ->
+    % Not enough entries with no values (extremely rare).
+    % Remove entries with values and put those values in the anonymous list.
+    C = lists:reverse(Acc),
+    {C1,C2} = lists:split(N,C),
+    Values = values({C1,[]}),
+    {lists:sort(C2), Values ++ A};
+prune_size1({C,A}, 0, Acc) ->
+    % Reverse Acc and append to C.
+    {lists:sort(Acc ++ C), A};
+prune_size1({[{_,_,[],_}|T],A}, N, Acc) -> 
+    % Only discard if entry has no values.
+    prune_size1({T,A}, N-1, Acc);
+prune_size1({[H|T],A}, N, Acc) ->
+    prune_size1({T,A}, N, [H|Acc]).
+
+
+% @doc Possibly shrink the size of a vclock, depending on current age and values.
+-spec prune_time(C::clock(), TS::timestamp()) -> clock().
+prune_time({C,A}, TS) ->
+    % This sort need to be deterministic, to avoid spurious merge conflicts later.
+    % We achieve this by using the ID as secondary key.
+    C2 = lists:sort(fun({I1,_,_,T1},{I2,_,_,T2}) -> {T1,I1} < {T2,I2} end, C),
+    % Only discard if entry has no values.
+    prune_time1({C2,A}, TS, []).
+
+prune_time1({[],A}, _, Acc) ->
+    {lists:sort(Acc), A};
+prune_time1({[{_,_,[],T1}|T],A}, TS, Acc) when T1 < TS ->
+    prune_time1({T,A}, TS, Acc);
+prune_time1({[H|T],A}, TS, Acc) ->
+    prune_time1({T,A}, TS, [H|Acc]).
+
+
+
+
+-define(DAYS_FROM_GREGORIAN_BASE_TO_EPOCH, (1970*365+478)).
+-define(SECONDS_FROM_GREGORIAN_BASE_TO_EPOCH,
+    (?DAYS_FROM_GREGORIAN_BASE_TO_EPOCH * 24*60*60)
+    %% == calendar:datetime_to_gregorian_seconds({{1970,1,1},{0,0,0}})
+       ).
+
+%% @doc Return a timestamp for a logical clock
+-spec timestamp() -> timestamp().
+timestamp() ->
+    %% Same as calendar:datetime_to_gregorian_seconds(erlang:universaltime()),
+    %% but significantly faster.
+    {MegaSeconds, Seconds, _} = os:timestamp(),
+    ?SECONDS_FROM_GREGORIAN_BASE_TO_EPOCH + MegaSeconds*1000000 + Seconds.
 
 
 %% ===================================================================
@@ -301,104 +384,104 @@ join_and_replace(Ir, V, C) ->
 
 
 join_test() ->
-    A  = new([v1]),
+    A  = new(v1),
     A1 = update(A,a),
-    B  = new(join(A1),[v2]),
+    B  = new(join(A1),v2),
     B1 = update(B, A1, b),
-    ?assertEqual( join(A)  , []             ),
-    ?assertEqual( join(A1) , [{a,1}]        ),
-    ?assertEqual( join(B1) , [{a,1},{b,1}]  ),
+    ?assertMatch( []                , join(A)  ),
+    ?assertMatch( [{a,1,_}]         , join(A1) ),
+    ?assertMatch( [{a,1,_},{b,1,_}] , join(B1) ),
     ok.
 
 update_test() ->
-    A0 = update(new([v1]),a),
-    A1 = update(new(join(A0),[v2]), A0, a),
-    A2 = update(new(join(A1),[v3]), A1, b),
-    A3 = update(new(join(A0),[v4]), A1, b),
-    A4 = update(new(join(A0),[v5]), A1, a),
-    ?assertEqual( A0 , {[{a,1,[v1]}],[]}                ),
-    ?assertEqual( A1 , {[{a,2,[v2]}],[]}                ),
-    ?assertEqual( A2 , {[{a,2,[]}, {b,1,[v3]}],[]}      ),
-    ?assertEqual( A3 , {[{a,2,[v2]}, {b,1,[v4]}],[]}    ),
-    ?assertEqual( A4 , {[{a,3,[v5,v2]}],[]}             ),
+    A0 = update(new(v1),a),
+    A1 = update(new(join(A0),v2), A0, a),
+    A2 = update(new(join(A1),v3), A1, b),
+    A3 = update(new(join(A0),v4), A1, b),
+    A4 = update(new(join(A0),v5), A1, a),
+    ?assertMatch( {[{a,1,[v1],_}],[]}               , A0  ),
+    ?assertMatch( {[{a,2,[v2],_}],[]}               , A1  ),
+    ?assertMatch( {[{a,2,[],_}, {b,1,[v3],_}],[]}   , A2  ),
+    ?assertMatch( {[{a,2,[v2],_}, {b,1,[v4],_}],[]} , A3  ),
+    ?assertMatch( {[{a,3,[v5,v2],_}],[]}            , A4  ),
     ok.
 
 sync_test() ->
-    X   = {[{x,1,[]}],[]},
-    A   = update(new([v1]),a),
-    Y   = update(new([v2]),b),
-    A1  = update(new(join(A),[v2]), a),
-    A3  = update(new(join(A1),[v3]), b),
-    A4  = update(new(join(A1),[v3]), c),
+    X   = {[{x,1,[],1}],[]},
+    A   = update(new(v1),a),
+    Y   = update(new(v2),b),
+    A1  = update(new(join(A),v2), a),
+    A3  = update(new(join(A1),v3), b),
+    A4  = update(new(join(A1),v3), c),
     F   = fun (L,R) -> L>R end,
-    W   = {[{a,1,[]}],[]},
-    Z   = {[{a,2,[v2,v1]}],[]},
-    ?assertEqual( sync([W,Z])     , {[{a,2,[v2]}],[]}                         ),
+    W   = {[{a,1,[],2}],[]},
+    Z   = {[{a,2,[v2,v1],3}],[]},
+    ?assertMatch( {[{a,2,[v2],_}],[]}                           , sync([W,Z]) ),
+    ?assertMatch( {[{a,2,[],_}, {b,1,[v3],_}, {c,1,[v3],_}],[]} , sync([A4,A3]) ),
+    ?assertMatch( {[{a,1,[v1],_},{x,1,[],_}],[]}                , sync([X,A]) ),
+    ?assertMatch( {[{a,1,[v1],_},{b,1,[v2],_}],[]}              , sync([A,Y]) ),
     ?assertEqual( sync([W,Z])     , sync([Z,W])                               ),
     ?assertEqual( sync([A,A1])    , sync([A1,A])                              ),
     ?assertEqual( sync([A4,A3])   , sync([A3,A4])                             ),
-    ?assertEqual( sync([A4,A3])   , {[{a,2,[]}, {b,1,[v3]}, {c,1,[v3]}],[]}   ),
-    ?assertEqual( sync([X,A])     , {[{a,1,[v1]},{x,1,[]}],[]}                ),
     ?assertEqual( sync([X,A])     , sync([A,X])                               ),
     ?assertEqual( sync([X,A])     , sync([A,X])                               ),
-    ?assertEqual( sync([A,Y])     , {[{a,1,[v1]},{b,1,[v2]}],[]}              ),
     ?assertEqual( sync([Y,A])     , sync([A,Y])                               ),
     ?assertEqual( sync([Y,A])     , sync([A,Y])                               ),
     ?assertEqual( sync([A,X])     , sync([X,A])                               ),
-    ?assertEqual( lww(F,A4)     , sync([A4,lww(F,A4)])                        ),
+    ?assertEqual( lww(F,A4)       , sync([A4,lww(F,A4)])                      ),
     ok.
 
-syn_update_test() ->
-    A0  = update(new([v1]), a),             % Mary writes v1 w/o VV
+sync_update_test() ->
+    A0  = update(new(v1), a),             % Mary writes v1 w/o VV
     VV1 = join(A0),                         % Peter reads v1 with version vector (VV)
-    A1  = update(new([v2]), A0, a),         % Mary writes v2 w/o VV
-    A2  = update(new(VV1,[v3]), A1, a),     % Peter writes v3 with VV from v1
-    ?assertEqual( VV1 , [{a,1}]                          ),
-    ?assertEqual( A0  , {[{a,1,[v1]}],[]}                ),
-    ?assertEqual( A1  , {[{a,2,[v2,v1]}],[]}             ),
+    A1  = update(new(v2), A0, a),         % Mary writes v2 w/o VV
+    A2  = update(new(VV1,v3), A1, a),     % Peter writes v3 with VV from v1
+    ?assertMatch( [{a,1,_}]                 , VV1 ),
+    ?assertMatch( {[{a,1,[v1],_}],[]}       , A0  ),
+    ?assertMatch(  {[{a,2,[v2,v1],_}],[]}   , A1  ),
     % now A2 should only have v2 and v3, since v3 was causally newer than v1
-    ?assertEqual( A2  , {[{a,3,[v3,v2]}],[]}             ),
+    ?assertMatch( {[{a,3,[v3,v2],_}],[]}    , A2  ),
     ok.
 
 event_test() ->
-    {A,_} = update(new([v1]),a),
-    ?assertEqual( event(A,a,v2) , [{a,2,[v2,v1]}]           ),
-    ?assertEqual( event(A,b,v2) , [{a,1,[v1]}, {b,1,[v2]}]  ),
+    {A,_} = update(new(v1),a),
+    ?assertMatch( [{a,2,[v2,v1],_}]             , event(A,a,v2) ),
+    ?assertMatch( [{a,1,[v1],_}, {b,1,[v2],_}]  , event(A,b,v2) ),
     ok.
 
 lww_last_test() ->
     F  = fun (A,B) -> A =< B end,
     F2 = fun ({_,TS1}, {_,TS2}) -> TS1 =< TS2 end,
-    X  = {[{a,4,[5,2]},{b,1,[]},{c,1,[3]}],[]},
-    Y  = {[{a,4,[5,2]},{b,1,[]},{c,1,[3]}],[10,0]},
-    Z  = {[{a,4,[5,2]}, {b,1,[1]}], [3]},
-    A  = {[{a,4,[{5, 1002345}, {7, 1002340}]}, {b,1,[{4, 1001340}]}], [{2, 1001140}]},
-    ?assertEqual( last(F,X) , 5                                         ),
-    ?assertEqual( last(F,Y) , 10                                        ),
-    ?assertEqual( lww(F,X)  , {[{a,4,[5]},{b,1,[]},{c,1,[]}],[]}        ),
-    ?assertEqual( lww(F,Y)  , {[{a,4,[]},{b,1,[]},{c,1,[]}],[10]}       ),
-    ?assertEqual( lww(F,Z)  , {[{a,4,[5]},{b,1,[]}],[]}                 ),
-    ?assertEqual( lww(F2,A) , {[{a,4,[{5, 1002345}]}, {b,1,[]}], []}    ),
+    X  = {[{a,4,[5,2],1},{b,1,[],1},{c,1,[3],1}],[]},
+    Y  = {[{a,4,[5,2],1},{b,1,[],1},{c,1,[3],1}],[10,0]},
+    Z  = {[{a,4,[5,2],1}, {b,1,[1],1}], [3]},
+    A  = {[{a,4,[{5, 1002345}, {7, 1002340}],1}, {b,1,[{4, 1001340}],1}], [{2, 1001140}]},
+    ?assertEqual( last(F,X) , 5                                          ),
+    ?assertEqual( last(F,Y) , 10                                         ),
+    ?assertEqual( lww(F,X)  , {[{a,4,[5],1},{b,1,[],1},{c,1,[],1}],[]}   ),
+    ?assertEqual( lww(F,Y)  , {[{a,4,[],1},{b,1,[],1},{c,1,[],1}],[10]}  ),
+    ?assertEqual( lww(F,Z)  , {[{a,4,[5],1},{b,1,[],1}],[]}              ),
+    ?assertEqual( lww(F2,A) , {[{a,4,[{5, 1002345}],1}, {b,1,[],1}], []} ),
     ok.
 
 reconcile_test() ->
     F1 = fun (L) -> lists:sum(L) end,
     F2 = fun (L) -> hd(lists:sort(L)) end,
-    X  = {[{a,4,[5,2]},{b,1,[]},{c,1,[3]}],[]},
-    Y  = {[{a,4,[5,2]},{b,1,[]},{c,1,[3]}],[10,0]},
-    ?assertEqual( reconcile(F1,X) , {[{a,4,[]},{b,1,[]},{c,1,[]}],[10]} ),
-    ?assertEqual( reconcile(F1,Y) , {[{a,4,[]},{b,1,[]},{c,1,[]}],[20]} ),
-    ?assertEqual( reconcile(F2,X) , {[{a,4,[]},{b,1,[]},{c,1,[]}],[2]}  ),
-    ?assertEqual( reconcile(F2,Y) , {[{a,4,[]},{b,1,[]},{c,1,[]}],[0]}  ),
+    X  = {[{a,4,[5,2],1},{b,1,[],1},{c,1,[3],1}],[]},
+    Y  = {[{a,4,[5,2],1},{b,1,[],1},{c,1,[3],1}],[10,0]},
+    ?assertEqual( reconcile(F1,X) , {[{a,4,[],1},{b,1,[],1},{c,1,[],1}],[10]} ),
+    ?assertEqual( reconcile(F1,Y) , {[{a,4,[],1},{b,1,[],1},{c,1,[],1}],[20]} ),
+    ?assertEqual( reconcile(F2,X) , {[{a,4,[],1},{b,1,[],1},{c,1,[],1}],[2]}  ),
+    ?assertEqual( reconcile(F2,Y) , {[{a,4,[],1},{b,1,[],1},{c,1,[],1}],[0]}  ),
     ok.
 
 less_test() ->
-    A  = update(new(v1),[a]),
-    B  = update(new(join(A),[v2]), a),
-    B2 = update(new(join(A),[v2]), b),
-    B3 = update(new(join(A),[v2]), z),
-    C  = update(new(join(B),[v3]), A, c),
-    D  = update(new(join(C),[v4]), B2, d),
+    A  = update(new(v1),a),
+    B  = update(new(join(A),v2), a),
+    B2 = update(new(join(A),v2), b),
+    B3 = update(new(join(A),v2), z),
+    C  = update(new(join(B),v3), A, c),
+    D  = update(new(join(C),v4), B2, d),
     ?assert(    less(A,B)  ),
     ?assert(    less(A,C)  ),
     ?assert(    less(B,C)  ),
@@ -415,9 +498,9 @@ less_test() ->
     ok.
 
 equal_test() ->
-    A = {[{a,4,[v5,v0]},{b,0,[]},{c,1,[v3]}], [v0]},
-    B = {[{a,4,[v555,v0]}, {b,0,[]}, {c,1,[v3]}], []},
-    C = {[{a,4,[v5,v0]},{b,0,[]}], [v6,v1]},
+    A = {[{a,4,[v5,v0],1},{b,0,[],1},{c,1,[v3],1}], [v0]},
+    B = {[{a,4,[v555,v0],1}, {b,0,[],1}, {c,1,[v3],1}], []},
+    C = {[{a,4,[v5,v0],1},{b,0,[],1}], [v6,v1]},
     % compare only the causal history
     ?assert(    equal(A,B) ),
     ?assert(    equal(B,A) ),
@@ -426,14 +509,14 @@ equal_test() ->
     ok.
 
 size_test() ->
-    ?assertEqual( 1 , ?MODULE:size(new([v1]))                                       ),
-    ?assertEqual( 5 , ?MODULE:size({[{a,4,[v5,v0]},{b,0,[]},{c,1,[v3]}],[v4,v1]})   ),
+    ?assertEqual( 1 , ?MODULE:size(new(v1))                                       ),
+    ?assertEqual( 5 , ?MODULE:size({[{a,4,[v5,v0],1},{b,0,[],1},{c,1,[v3],1}],[v4,v1]})   ),
     ok.
 
 ids_values_test() ->
-    A = {[{a,4,[v0,v5]},{b,0,[]},{c,1,[v3]}], [v1]},
-    B = {[{a,4,[v0,v555]}, {b,0,[]}, {c,1,[v3]}], []},
-    C = {[{a,4,[]},{b,0,[]}], [v1,v6]},
+    A = {[{a,4,[v0,v5],1},{b,0,[],1},{c,1,[v3],1}], [v1]},
+    B = {[{a,4,[v0,v555],1}, {b,0,[],1}, {c,1,[v3],1}], []},
+    C = {[{a,4,[],1},{b,0,[],1}], [v1,v6]},
     ?assertEqual( ids(A)                , [a,b,c]       ),
     ?assertEqual( ids(B)                , [a,b,c]       ),
     ?assertEqual( ids(C)                , [a,b]         ),
@@ -443,11 +526,30 @@ ids_values_test() ->
     ok.
 
 map_test() ->
-    A = {[{a,4,[]},{b,0,[]},{c,1,[]}],[10]},
-    B = {[{a,4,[5,0]},{b,0,[]},{c,1,[2]}],[20,10]},
+    A = {[{a,4,[],1},{b,0,[],1},{c,1,[],1}],[10]},
+    B = {[{a,4,[5,0],1},{b,0,[],1},{c,1,[2],1}],[20,10]},
     F = fun (X) -> X*2 end,
-    ?assertEqual( map(F,A) , {[{a,4,[]},{b,0,[]},{c,1,[]}],[20]}            ),
-    ?assertEqual( map(F,B) , {[{a,4,[10,0]},{b,0,[]},{c,1,[4]}],[40,20]}    ),
+    ?assertEqual( map(F,A) , {[{a,4,[],1},{b,0,[],1},{c,1,[],1}],[20]}            ),
+    ?assertEqual( map(F,B) , {[{a,4,[10,0],1},{b,0,[],1},{c,1,[4],1}],[40,20]}    ),
+    ok.
+
+prune_size_test() ->
+    A = {[{a,4,[v1],1},{b,0,[v2],5},{c,1,[],2}],[v10]},
+    ?assertEqual( {[{a,4,[v1],1},{b,0,[v2],5},{c,1,[],2}],[v10]} , prune_size(A,10)),
+    ?assertEqual( {[{a,4,[v1],1},{b,0,[v2],5},{c,1,[],2}],[v10]} , prune_size(A,3)),
+    ?assertEqual( {[{a,4,[v1],1},{b,0,[v2],5}],[v10]}            , prune_size(A,2)),
+    ?assertEqual( {[{b,0,[v2],5}],[v1,v10]}                      , prune_size(A,1)),
+    ?assertEqual( {[],[v1,v2,v10]}                               , prune_size(A,0)),
+    ok.
+
+prune_time_test() ->
+    A = {[{a,4,[v1],3},{b,0,[],5},{c,1,[],2}],[v10]},
+    ?assertEqual( {[{a,4,[v1],3},{b,0,[],5},{c,1,[],2}],[v10]}   , prune_time(A,1)),
+    ?assertEqual( {[{a,4,[v1],3},{b,0,[],5},{c,1,[],2}],[v10]}   , prune_time(A,2)),
+    ?assertEqual( {[{a,4,[v1],3},{b,0,[],5}],[v10]}              , prune_time(A,3)),
+    ?assertEqual( {[{a,4,[v1],3},{b,0,[],5}],[v10]}              , prune_time(A,4)),
+    ?assertEqual( {[{a,4,[v1],3}],[v10]}                          , prune_time(A,6)),
+    ?assertEqual( {[{a,4,[v1],3}],[v10]}                                     , prune_time(A,100)),
     ok.
 
 -endif.
