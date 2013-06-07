@@ -324,6 +324,35 @@ The major use case that DVVSet targets is a client-server system over a distribu
     We could do only `DVVSet = dvvset:new([V])` and write DVVSet immediately, saving the cost of a local read, but generally its safer to preserve causal information, especially if the *lww* policy can be turned on and off per request or changed during a key lifetime;
 
 
+## Removing old entries
+
+If we want to bound the number of entries of a dvvset, we can use the function
+`prune`, which takes the current dvvset and the *maximum number of entries
+(MAX)* we want. If the dvvset exceeds MAX, we throw away the oldest entry that
+has no values (if it exists).  We can know the oldest entry because we keep a
+*timestamp (TS)* for each one. This TS is updated in 3 situations:
+
+* The node serving a PUT executes `update`, passing it the current system TS,
+which is then associated to the entry of that node's ID;
+* A node receives a replicated PUT to store, so it syncs it with the local object
+and calls the function `update_ts` with its node ID, before saving;
+* A node receives a PUT to synchronize locally (e.g anti-entropy). If the local
+object is obsolete, use the `update_ts` as before and save locally. Thus, we 
+only update the TS if we were already going to save a new version of that object.
+
+The `update_ts` takes the newest TS in the dvvset and copies it to that entry
+with the ID that was passed. This makes the nodes IDs that were retired (e.g.
+the node crashed) would never be updated again, to never update their TS. On the
+other hand, every node that serves PUTs and also saves new versions for that
+object, will have an increasing TS. Thus, we can safely assume that retired IDs
+would be first ones to be removed, and by using a reasonable MAX (at least equal
+to replication factor) we would only remove information from old nodes.
+
+To enable this pruning, we only have to call `update` with the current system
+TS, call `prune` with MAX (a safe value would be replication factor + 1) and
+when we are locally updating a value (replicated PUT, or synchronizing with a
+newer object), call `update_ts` with the local node ID.
+
 
 
 
