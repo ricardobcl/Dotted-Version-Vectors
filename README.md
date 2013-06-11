@@ -352,10 +352,9 @@ would only remove information from old nodes. Using `MAX = N + 1` means that we
 only prune an entry when a second node crashes, and by that time, the entry with
 the node ID that crashed first would have the lowest LT, thus safely pruned.
 
-To enable this pruning, we only have to call `update` with the current system
-TS, call `prune` with MAX and when we are locally updating a value (replicated
-PUT, or synchronizing with a newer object), call `update_time` with the local
-node ID.
+To enable this, we call `prune` with MAX when coordinating a PUT request, and
+when we are locally updating a value (a replicated PUT, or synchronizing with a
+newer object), we call `update_time` with the local node ID.
 
 
 
