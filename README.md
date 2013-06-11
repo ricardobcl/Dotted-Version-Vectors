@@ -332,8 +332,8 @@ If we want to bound the number of entries of a dvvset, we can use the function
 has no values (if it exists).  We can know the oldest entry because we keep a
 *logical time (LT)* for each one. This LT is updated in 3 situations:
 
-* The node serving a PUT executes `update`, we calculate the maximum LT for all entries,
-add 1 and associate it to the entry of that node's ID;
+* The node serving a PUT executes `update`, we calculate the maximum LT for all
+entries, add 1 and associate it to the entry of that node's ID;
 * A node receives a replicated PUT to store, so it syncs it with the local object
 and calls the function `update_time` with its node ID, before saving; it updates 
 the entry with that node ID with the maximum LT of the dvvset;
@@ -352,9 +352,10 @@ would only remove information from old nodes. Using `MAX = N + 1` means that we
 only prune an entry when a second node crashes, and by that time, the entry with
 the node ID that crashed first would have the lowest LT, thus safely pruned.
 
-To enable this, we call `prune` with MAX when coordinating a PUT request, and
-when we are locally updating a value (a replicated PUT, or synchronizing with a
-newer object), we call `update_time` with the local node ID.
+To enable this, we call `prune` with MAX when coordinating a PUT request (and
+after `update`), and when we are locally updating a new version (for a
+replicated PUT, or synchronizing with a newer object), we call `update_time`
+with the local node ID.
 
 
 
