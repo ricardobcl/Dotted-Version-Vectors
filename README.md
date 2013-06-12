@@ -326,12 +326,16 @@ The major use case that DVVSet targets is a client-server system over a distribu
 
 ## Removing old entries
 
-If we want to bound the number of entries of a dvvset, we can use the function
-`prune`, which takes a dvvset and the *maximum number of entries (MAX)* we want
-to have. If the dvvset exceeds MAX, we throw away the oldest entry that has no
-values (if there isn't any, don't do anything). We can know the oldest entry
-because we keep a *logical time (LT)* for each one. This LT is updated in 3
-situations:
+If we *really* want to bound the number of entries of a dvvset, we can use the
+function `prune`, which takes a dvvset and the *maximum number of entries (MAX)*
+we want to have. If the dvvset exceeds MAX, we throw away the oldest entry that
+has no values (if there isn't any, don't do anything). We can know the oldest
+entry because we keep a *logical time (LT)* for each one. LT provides
+everything we wanted with realtime timestamps, but with 2 advantages: there is
+no need to get / calculate the realtime for every update, and with logical time, we are
+immune to system clock skews.
+
+This LT is updated in 3 situations:
 
 * The node **serving a PUT** executes `update`, we calculate the maximum LT for all
 entries, add 1 and associate it to the entry of that node's ID;
@@ -356,7 +360,6 @@ retired nodes).
 To enable this, we add two function to our code:
 
 1. Call `prune` with MAX after calling `update` in the coordinating node; 
-
 2. When locally updating / synchronizing a new version (for a replicated PUT, or
 anti-entropy), call `update_time` with the local node ID after calling `sync`.
 
