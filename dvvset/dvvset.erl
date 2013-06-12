@@ -44,8 +44,8 @@
          new_list/2,
          sync/1,
          join/1,
+         update/2,
          update/3,
-         update/4,
          size/1,
          ids/1,
          values/1,
@@ -56,10 +56,10 @@
          lww/2,
          reconcile/2,
          prune/2,
-         update_ts/2
+         update_time/2
         ]).
 
--export_type([clock/0, vector/0, id/0, value/0, timestamp/0]).
+-export_type([clock/0, vector/0, id/0, value/0, logical_time/0]).
 
 % % @doc
 %% STRUCTURE details:
@@ -67,14 +67,14 @@
 %%      * each counter() also includes the number of values in that id()
 %%      * the values in each triple of entries() are causally ordered and each new value goes to the head of the list
 
--type clock()     :: {entries(), values()}.
--type vector()    :: [{id(), counter(), timestamp()}].
--type entries()   :: [{id(), counter(), values(), timestamp()}].
--type id()        :: any().
--type values()    :: [value()].
--type value()     :: any().
--type counter()   :: non_neg_integer().
--type timestamp() :: pos_integer().
+-type clock()         :: {entries(), values()}.
+-type vector()        :: [{id(), counter(), logical_time()}].
+-type entries()       :: [{id(), counter(), values(), logical_time()}].
+-type id()            :: any().
+-type values()        :: [value()].
+-type value()         :: any().
+-type counter()       :: non_neg_integer().
+-type logical_time()  :: pos_integer().
 
 
 %% @doc Constructs a new clock set without causal history,
@@ -114,11 +114,12 @@ sync(C ,{}) -> C;
 sync(C1={E1,V1},C2={E2,V2}) ->
     V = case less(C1,C2) of
         true  -> V2; % C1 < C2 => return V2
-        false -> case less(C2,C1) of
-                    true  -> V1; % C2 < C1 => return V1
-                    false -> % keep all unique anonymous values and sync entries()
-                        sets:to_list(sets:from_list(V1++V2))
-                 end
+        false ->
+            case less(C2,C1) of
+                true  -> V1; % C2 < C1 => return V1
+                false -> % keep all unique anonymous values and sync entries()
+                    sets:to_list(sets:from_list(V1++V2))
+            end
     end,
     {sync2(E1,E2),V}.
 
@@ -126,40 +127,40 @@ sync(C1={E1,V1},C2={E2,V2}) ->
 -spec sync2(entries(), entries()) -> entries().
 sync2([], C) -> C;
 sync2(C, []) -> C;
-sync2([{I1, N1, L1, TS1}=H1 | T1]=C1, [{I2, N2, L2, TS2}=H2 | T2]=C2) ->
+sync2([{I1, N1, L1, LT1}=H1 | T1]=C1, [{I2, N2, L2, LT2}=H2 | T2]=C2) ->
     if
       I1 < I2 -> [H1 | sync2(T1, C2)];
       I1 > I2 -> [H2 | sync2(T2, C1)];
-      true    -> [merge(I1, N1, L1, N2, L2, max(TS1,TS2)) | sync2(T1, T2)]
+      true    -> [merge(I1, N1, L1, N2, L2, max(LT1,LT2)) | sync2(T1, T2)]
     end.
 
 %% Private function
--spec merge(id(), counter(), values(), counter(), values(), timestamp()) 
-    -> {id(), counter(), values(), timestamp()}.
-merge(I, N1, L1, N2, L2, TS) ->
+-spec merge(id(), counter(), values(), counter(), values(), logical_time()) 
+    -> {id(), counter(), values(), logical_time()}.
+merge(I, N1, L1, N2, L2, LT) ->
     LL1 = length(L1),
     LL2 = length(L2),
     case N1 >= N2 of
         true ->
           case N1 - LL1 >=  N2 - LL2 of 
-            true  -> {I, N1, L1, TS};
-            false -> {I, N1, lists:sublist(L1, N1 - N2 + LL2), TS}
+            true  -> {I, N1, L1, LT};
+            false -> {I, N1, lists:sublist(L1, N1 - N2 + LL2), LT}
           end;
         false ->
           case N2 - LL2 >=  N1 - LL1 of 
-            true  -> {I, N2, L2, TS};
-            false -> {I, N2, lists:sublist(L2, N2 - N1 + LL1), TS}
+            true  -> {I, N2, L2, LT};
+            false -> {I, N2, lists:sublist(L2, N2 - N1 + LL1), LT}
           end
     end.
 
 %% @doc Receives a clock and an ID. The entry with that ID (if it exists)
-%% will have its TS set equal to the maximum TS in the entire clock.
--spec update_ts(clock(), id()) -> clock().
-update_ts({C,A}, I) ->
-    TS = lists:max([T || {_,_,_,T} <- C]),
-    C2 = [if I == Ir -> {Ir, N, V, TS} ;
-             true    -> {Ir, N, V, TS1} end
-            || {Ir, N, V, TS1} <- C],
+%% will have its LT set equal to the maximum LT in the entire clock.
+-spec update_time(clock(), id()) -> clock().
+update_time({C,A}, I) ->
+    LT = max_LT(C),
+    C2 = [if I == Ir -> {Ir, N, V, LT} ;
+             true    -> {Ir, N, V, OldLT} end
+            || {Ir, N, V, OldLT} <- C],
     {C2,A}.
 
 %% @doc Return a version vector that represents the causal history.
@@ -169,9 +170,10 @@ join({C,_}) -> [{I, N, T} || {I, N, _, T} <- C].
 %% @doc Advances the causal history with the given id.
 %% The new value is the *anonymous dot* of the clock.
 %% The client clock SHOULD BE a direct result of new/2.
--spec update(clock(), id(), timestamp()) -> clock().
-update({C,[V]}, I, TS) ->
-    {event(C, I, V, TS), []}.
+-spec update(clock(), id()) -> clock().
+update({C,[V]}, I) ->
+    LT = max_LT(C),
+    {event(C, I, V, LT+1), []}.
 
 %% @doc Advances the causal history of the
 %% first clock with the given id, while synchronizing
@@ -182,25 +184,35 @@ update({C,[V]}, I, TS) ->
 %% which is intended to be the client clock with
 %% the new value in the *anonymous dot* while
 %% the second clock is from the local server.
--spec update(clock(), clock(), id(), timestamp()) -> clock().
-update({Cc,[V]}, Cr, I, TS) ->
+-spec update(clock(), clock(), id()) -> clock().
+update({Cc,[V]}, Cr, I) ->
     %% Sync both clocks without the new value
     {C,Vs} = sync({Cc,[]}, Cr),
+    LT = max_LT(C),
     %% We create a new event on the synced causal history,
     %% with the id I and the new value.
     %% The anonymous values that were synced still remain.
-    {event(C, I, V, TS), Vs}.
+    {event(C, I, V, LT+1), Vs}.
+
+%% @doc Gets the maximum logical time available in the dvvset.
+-spec max_LT(entries()) -> logical_time().
+max_LT(C) ->
+  L = [LT || {_,_,_,LT} <- C],
+  case L of
+    [] -> 0;
+    _  -> lists:max(L)
+  end.
 
 %% Private function
--spec event(vector(), id(), value(), timestamp()) -> entries().
-event([], I, V, TS) ->
-    [{I, 1, [V], TS}];
-event([{I, N, L, _} | T], I, V, TS) ->
-    [{I, N+1, [V | L], TS} | T];
-event([{I1, _, _, _} | _]=C, I, V, TS) when I1 > I ->
-    [{I, 1, [V], TS} | C];
-event([H | T], I, V, TS) ->
-    [H | event(T, I, V, TS)].
+-spec event(vector(), id(), value(), logical_time()) -> entries().
+event([], I, V, LT) ->
+    [{I, 1, [V], LT}];
+event([{I, N, L, _} | T], I, V, LT) ->
+    [{I, N+1, [V | L], LT} | T];
+event([{I1, _, _, _} | _]=C, I, V, LT) when I1 > I ->
+    [{I, 1, [V], LT} | C];
+event([H | T], I, V, LT) ->
+    [H | event(T, I, V, LT)].
 
 %% @doc Returns the total number of values in this clock set.
 -spec size(clock()) -> non_neg_integer().
@@ -224,7 +236,7 @@ equal(C1,C2) when is_list(C1) and is_list(C2) -> equal2(C1,C2). %vector clocks
 %% Private function
 -spec equal2(vector(), vector()) -> boolean().
 equal2([], []) -> true;
-equal2([{I, C, L1, TS} | T1], [{I, C, L2, TS} | T2]) 
+equal2([{I, C, L1, LT} | T1], [{I, C, L2, LT} | T2]) 
     when length(L1) =:= length(L2) -> 
     equal2(T1, T2);
 equal2(_, _) -> false.
@@ -355,45 +367,43 @@ prune_leq({I1,_,_,T1}, {I2,_,_,T2}) ->
 %% ===================================================================
 -ifdef(TEST).
 
--define(TS, 2013).
-
 join_test() ->
     A  = new(v1),
-    A1 = update(A ,a, ?TS),
+    A1 = update(A ,a),
     B  = new(join(A1), v2),
-    B1 = update(B, A1, b, ?TS),
-    ?assertMatch( []                , join(A)  ),
-    ?assertMatch( [{a,1,_}]         , join(A1) ),
-    ?assertMatch( [{a,1,_},{b,1,_}] , join(B1) ),
+    B1 = update(B, A1, b),
+    ?assertEqual( []                , join(A)  ),
+    ?assertEqual( [{a,1,1}]         , join(A1) ),
+    ?assertEqual( [{a,1,1},{b,1,2}] , join(B1) ),
     ok.
 
 update_test() ->
-    A0 = update(new(v1), a, ?TS),
-    A1 = update(new(join(A0),v2), A0, a, ?TS),
-    A2 = update(new(join(A1),v3), A1, b, ?TS),
-    A3 = update(new(join(A0),v4), A1, b, ?TS),
-    A4 = update(new(join(A0),v5), A1, a, ?TS),
-    ?assertMatch( {[{a,1,[v1],_}],[]}               , A0  ),
-    ?assertMatch( {[{a,2,[v2],_}],[]}               , A1  ),
-    ?assertMatch( {[{a,2,[],_}, {b,1,[v3],_}],[]}   , A2  ),
-    ?assertMatch( {[{a,2,[v2],_}, {b,1,[v4],_}],[]} , A3  ),
-    ?assertMatch( {[{a,3,[v5,v2],_}],[]}            , A4  ),
+    A0 = update(new(v1), a),
+    A1 = update(new(join(A0),v2), A0, a),
+    A2 = update(new(join(A1),v3), A1, b),
+    A3 = update(new(join(A0),v4), A1, b),
+    A4 = update(new(join(A0),v5), A1, a),
+    ?assertEqual( {[{a,1,[v1],1}],[]}               , A0  ),
+    ?assertEqual( {[{a,2,[v2],2}],[]}               , A1  ),
+    ?assertEqual( {[{a,2,[],2}, {b,1,[v3],3}],[]}   , A2  ),
+    ?assertEqual( {[{a,2,[v2],2}, {b,1,[v4],3}],[]} , A3  ),
+    ?assertEqual( {[{a,3,[v5,v2],3}],[]}            , A4  ),
     ok.
 
 sync_test() ->
+    A   = update(new(v1),a),
+    A1  = update(new(join(A),v2), a),
+    A3  = update(new(join(A1),v3), b),
+    A4  = update(new(join(A1),v3), c),
     X   = {[{x,1,[],1}],[]},
-    A   = update(new(v1),a, ?TS),
-    Y   = update(new(v2),b, ?TS),
-    A1  = update(new(join(A),v2), a, ?TS),
-    A3  = update(new(join(A1),v3), b, ?TS),
-    A4  = update(new(join(A1),v3), c, ?TS),
+    Y   = update(new(v2),b),
+    W   = {[{a,1,[],3}],[]},
+    Z   = {[{a,2,[v2,v1],2}],[]},
     F   = fun (L,R) -> L>R end,
-    W   = {[{a,1,[],2}],[]},
-    Z   = {[{a,2,[v2,v1],3}],[]},
-    ?assertMatch( {[{a,2,[v2],_}],[]}                           , sync([W,Z])   ),
-    ?assertMatch( {[{a,2,[],_}, {b,1,[v3],_}, {c,1,[v3],_}],[]} , sync([A4,A3]) ),
-    ?assertMatch( {[{a,1,[v1],_},{x,1,[],_}],[]}                , sync([X,A])   ),
-    ?assertMatch( {[{a,1,[v1],_},{b,1,[v2],_}],[]}              , sync([A,Y])   ),
+    ?assertEqual( {[{a,2,[v2],3}],[]}                           , sync([W,Z])   ),
+    ?assertEqual( {[{a,2,[],2}, {b,1,[v3],3}, {c,1,[v3],3}],[]} , sync([A4,A3]) ),
+    ?assertEqual( {[{a,1,[v1],1},{x,1,[],1}],[]}                , sync([X,A])   ),
+    ?assertEqual( {[{a,1,[v1],1},{b,1,[v2],1}],[]}              , sync([A,Y])   ),
     ?assertEqual( sync([W,Z])     , sync([Z,W])                                 ),
     ?assertEqual( sync([A,A1])    , sync([A1,A])                                ),
     ?assertEqual( sync([A4,A3])   , sync([A3,A4])                               ),
@@ -406,21 +416,21 @@ sync_test() ->
     ok.
 
 sync_update_test() ->
-    A0  = update(new(v1), a, ?TS),         % Mary writes v1 w/o VV
-    VV1 = join(A0),                        % Peter reads v1 with version vector (VV)
-    A1  = update(new(v2), A0, a, ?TS),     % Mary writes v2 w/o VV
-    A2  = update(new(VV1,v3), A1, a, ?TS), % Peter writes v3 with VV from v1
-    ?assertMatch( [{a,1,_}]                 , VV1 ),
-    ?assertMatch( {[{a,1,[v1],_}],[]}       , A0  ),
-    ?assertMatch(  {[{a,2,[v2,v1],_}],[]}   , A1  ),
+    A0  = update(new(v1), a),               % Mary writes v1 w/o VV
+    VV1 = join(A0),                         % Peter reads v1 with version vector (VV)
+    A1  = update(new(v2), A0, a),           % Mary writes v2 w/o VV
+    A2  = update(new(VV1,v3), A1, a),       % Peter writes v3 with VV from v1
+    ?assertEqual( [{a,1,1}]                 , VV1 ),
+    ?assertEqual( {[{a,1,[v1],1}],[]}       , A0  ),
+    ?assertEqual( {[{a,2,[v2,v1],2}],[]}    , A1  ),
     % now A2 should only have v2 and v3, since v3 was causally newer than v1
-    ?assertMatch( {[{a,3,[v3,v2],_}],[]}    , A2  ),
+    ?assertEqual( {[{a,3,[v3,v2],3}],[]}    , A2  ),
     ok.
 
 event_test() ->
-    {A,_} = update(new(v1),a, ?TS),
-    ?assertMatch( [{a,2,[v2,v1],_}]             , event(A,a,v2,?TS) ),
-    ?assertMatch( [{a,1,[v1],_}, {b,1,[v2],_}]  , event(A,b,v2,?TS) ),
+    {A,_} = update(new(v1),a),
+    ?assertEqual( [{a,2,[v2,v1],2}]             , event(A,a,v2,2) ),
+    ?assertEqual( [{a,1,[v1],1}, {b,1,[v2],4}]  , event(A,b,v2,4) ),
     ok.
 
 lww_last_test() ->
@@ -450,12 +460,12 @@ reconcile_test() ->
     ok.
 
 less_test() ->
-    A  = update(new(v1),a, ?TS),
-    B  = update(new(join(A),v2), a, ?TS),
-    B2 = update(new(join(A),v2), b, ?TS),
-    B3 = update(new(join(A),v2), z, ?TS),
-    C  = update(new(join(B),v3), A, c, ?TS),
-    D  = update(new(join(C),v4), B2, d, ?TS),
+    A  = update(new(v1),a),
+    B  = update(new(join(A),v2), a),
+    B2 = update(new(join(A),v2), b),
+    B3 = update(new(join(A),v2), z),
+    C  = update(new(join(B),v3), A, c),
+    D  = update(new(join(C),v4), B2, d),
     ?assert(    less(A,B)  ),
     ?assert(    less(A,C)  ),
     ?assert(    less(B,C)  ),
@@ -518,10 +528,12 @@ prune_test() ->
     ?assertEqual( {[{a,4,[v1],1},{b,0,[v2],5},{c,1,[v3],2}],[]}  , prune(B,2)),
     ok.
 
-update_ts_test() ->
+update_time_test() ->
     A = {[{a,4,[v1],1},{b,0,[v2],5},{c,1,[],2}],[v10]},
-    ?assertEqual( {[{a,4,[v1],1},{b,0,[v2],5},{c,1,[],5}],[v10]} , update_ts(A,c)),
-    ?assertEqual( A , update_ts(A,z)),
+    % Should update id "c" with the maximum logical time (5 in this case).
+    ?assertEqual( {[{a,4,[v1],1},{b,0,[v2],5},{c,1,[],5}],[v10]} , update_time(A,c)),
+    % Should return the clock w/o modifications, since z does not exist in the dvvset.
+    ?assertEqual( A , update_time(A,z)),
     ok.
 
 -endif.

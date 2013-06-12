@@ -327,35 +327,38 @@ The major use case that DVVSet targets is a client-server system over a distribu
 ## Removing old entries
 
 If we want to bound the number of entries of a dvvset, we can use the function
-`prune`, which takes the current dvvset and the *maximum number of entries
-(MAX)* we want. If the dvvset exceeds MAX, we throw away the oldest entry that
-has no values (if it exists).  We can know the oldest entry because we keep a
-*logical time (LT)* for each one. This LT is updated in 3 situations:
+`prune`, which takes a dvvset and the *maximum number of entries (MAX)* we want
+to have. If the dvvset exceeds MAX, we throw away the oldest entry that has no
+values (if there isn't any, don't do anything). We can know the oldest entry
+because we keep a *logical time (LT)* for each one. This LT is updated in 3
+situations:
 
-* The node serving a PUT executes `update`, we calculate the maximum LT for all
+* The node **serving a PUT** executes `update`, we calculate the maximum LT for all
 entries, add 1 and associate it to the entry of that node's ID;
-* A node receives a replicated PUT to store, so it syncs it with the local object
-and calls the function `update_time` with its node ID, before saving; it updates 
-the entry with that node ID with the maximum LT of the dvvset;
-* A node receives a PUT to synchronize locally (e.g anti-entropy). If the remote
+* A node receives a **replicated PUT** to store, so it syncs it with the local
+object and calls the function `update_time` with its node ID, before saving; it
+updates the entry of that node ID with the maximum LT of the dvvset (only if its
+node ID is present);
+* A node receives a PUT to **synchronize locally** (e.g anti-entropy). If the remote
 object is not obsolete, use the `update_time` as before and save locally. Thus, we 
 only update the LT if we were already going to save a new version of that object.
 
 The `update_time` copies the maximum LT in the dvvset to the entry with the ID
-that was passed. Thus, the nodes IDs that were retired (e.g. a node crashed)
-would never update their LT again. On the other hand, every node that serves
+that was passed. Nodes IDs that were retired (e.g. a node crashed)
+will never update their LT again. On the other hand, every node that serves
 PUTs and also saves new versions for that object, will have an increasing LT.
 
-Thus, we can safely assume that retired IDs would be first ones to be removed,
-and by using a reasonable MAX (at least equal to replication factor (N) + 1) we
-would only remove information from old nodes. Using `MAX = N + 1` means that we
-only prune an entry when a second node crashes, and by that time, the entry with
-the node ID that crashed first would have the lowest LT, thus safely pruned.
+Over time the oldest entries according to LT, would the ones that didn't
+recently save new versions for this key. Thus, when pruning, we should remove
+this entries first, since they are from the least participative nodes (or
+retired nodes).
 
-To enable this, we call `prune` with MAX when coordinating a PUT request (and
-after `update`), and when we are locally updating a new version (for a
-replicated PUT, or synchronizing with a newer object), we call `update_time`
-with the local node ID.
+To enable this, we add two function to our code:
+
+1. Call `prune` with MAX after calling `update` in the coordinating node; 
+
+2. When locally updating / synchronizing a new version (for a replicated PUT, or
+anti-entropy), call `update_time` with the local node ID after calling `sync`.
 
 
 
