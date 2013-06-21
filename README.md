@@ -333,11 +333,14 @@ We implemented DVVSet in our fork of [Basho's][riak site] [Riak][riak github]
 NoSQL database, as an alternative to their VV implementation, as a proof of
 concept.
 
-The Riak version using VV is here: https://github.com/ricardobcl/riak_kv/tree/master
+The Riak version using VV is here:
+https://github.com/ricardobcl/riak_kv/tree/master
 
-The Riak version using DVVset is here: https://github.com/ricardobcl/riak_kv/tree/dvvset
+The Riak version using DVVset is here:
+https://github.com/ricardobcl/riak_kv/tree/dvvset
 
-Lets take a look at 2 different scenarios, where we can clearly see real world advantages of DVVSet:
+Lets take a look at 2 different scenarios, where we can clearly see real world
+advantages of DVVSet:
 
 * **Scenario 1**
     1. client C1 writes and reads;
@@ -367,7 +370,8 @@ nodes:
 
 ```Erlang
 $ erlc sib.erl; erl sib -pa ebin deps/*/ebin
-Erlang R15B02 (erts-5.9.2) [source] [64-bit] [smp:4:4] [async-threads:0] [hipe] [kernel-poll:false] [dtrace]
+Erlang R15B02 (erts-5.9.2) [source] [64-bit] [smp:4:4] [async-threads:0] [hipe]
+[kernel-poll:false] [dtrace]
 
 Eshell V5.9.2  (abort with ^G)
 
@@ -490,7 +494,9 @@ entropy (keeps replicas up-to-date)**
     request or changed during a key lifetime;
 
 
-## Removing old entries
+## Different flavors of DVVSets
+
+### Removing old entries
 
 If we *really* want to bound the number of entries of a dvvset, we can use the
 function `prune`, which takes a dvvset and the *maximum number of entries (MAX)*
@@ -524,15 +530,16 @@ recently save new versions for this key. Thus, when pruning, we should remove
 this entries first, since they are from the least participative nodes (or
 retired nodes).
 
-To enable this, we add two function to our code:
+If you want to use this version of DVVSet, then use the file
+[dvvset_prune][dvvset prune] instead of [dvvset][dvvset original]. Then, add two function to
+your code:
 
 1. Call `prune` with MAX after calling `update` in the coordinating node; 
 2. When locally updating / synchronizing a new version (for a replicated PUT, or
 anti-entropy), call `update_time` with the local node ID after calling `sync`.
 
-
-
-
+[dvvset original]: https://github.com/ricardobcl/Dotted-Version-Vectors/blob/master/dvvset/dvvset.erl
+[dvvset prune]: https://github.com/ricardobcl/Dotted-Version-Vectors/blob/master/dvvset/dvvset_prune.erl
 [paper dvv]: http://gsd.di.uminho.pt/members/vff/dotted-version-vectors-2012.pdf
 [paper crdt]: http://hal.inria.fr/docs/00/61/73/41/PDF/RR-7687.pdf
 [blog VV are not VC]: http://haslab.wordpress.com/2011/07/08/version-vectors-are-not-vector-clocks
