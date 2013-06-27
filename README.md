@@ -1,4 +1,5 @@
-# Dotted Version Vector Sets - Managing Values with Causality
+# Dotted Version Vector Sets
+## Managing Values with Causality
 
 **TL;DR** Dotted Version Vector Sets are similar to Version Vectors (Vector
 Clocks for some), but prevent false conflicts that can occur with Version
@@ -7,11 +8,12 @@ databases with a get/put interface (has shown below).
 
 ### Contents
 
-- Intro
-- Why not Version Vectors (Vector Clocks)?
-- The Solution: Dotted Version Vector Sets
-- Real World with Riak
-- How to Use
+- [Intro](https://github.com/ricardobcl/Dotted-Version-Vectors#intro)
+- [Why not Version Vectors (Vector Clocks)?](https://github.com/ricardobcl/Dotted-Version-Vectors#why-not-version-vectors-vector-clocks)
+- [The Solution: Dotted Version Vector Sets](https://github.com/ricardobcl/Dotted-Version-Vectors#the-solution-dotted-version-vectors-sets)
+- [Real World with Riak](https://github.com/ricardobcl/Dotted-Version-Vectors#real-world-with-riak)
+- [How to Use](https://github.com/ricardobcl/Dotted-Version-Vectors#how-to-use)
+- [*Variations*](https://github.com/ricardobcl/Dotted-Version-Vectors#dvvsets-variations)
 
 ## Intro
 
@@ -22,24 +24,24 @@ related or conflicting values (values that reflect concurrent updates and that
 must be all kept until a future reconciliation supersedes them), but now with a
 smaller representation, very similar to Version Vectors in size.
 
-Let's assume the scenario of a Distributed Key-Value Storage (Ex: Riak,
-Cassandra, etc), where we have clients, servers and we can write ( **PUT** ) and
-read ( **GET** ) values. We also want to track the causality information of
+Lets assume the scenario of a Distributed Key-Value Store (Ex: Riak,
+Cassandra, etc), where we have clients, servers and we can write ( *PUT* ) and
+read ( *GET* ) values. We also want to track the causality information of
 these values, so that causally descendant values replace older values and
-causally concurrent values are all kept.
+causally concurrent values are all kept (for further reconciliation).
 
 We can use DVVSet to keep the values and their causal history together, with
-support for multiple conflicting (sibling) values. One DVVSet has 1 value (a
-single sibling) if there are no conflicts. Otherwise, it stores all conflicting
-values and their relevant causal information, all in a single DVVSet. Thus, this
-data structure encapsulates the process of *tracking*, *maintaining* and
-*reasoning* about the values' causality.
+support for multiple conflicting values (**siblings**). One DVVSet has 1 value
+(a single sibling) if there are no conflicts. Otherwise, it stores all siblings
+and their relevant causal information in a single DVVSet. Thus, this data
+structure encapsulates the *tracking*, *maintaining* and *reasoning* about the
+values' causality.
 
 
 ## Why not Version Vectors (Vector Clocks)?
 
-First, [Version Vectors are not Vector Clocks][blog VV are not VC], both have
-similar structure but different semantics. In this context, the relevant
+First, [Version Vectors are not Vector Clocks][blog VV are not VC]; both have
+similar structure but different semantics. In our context, the relevant
 mechanism is *Version Vectors (VV)*.
 
 Every key/value has an associated VV and sometimes conflicts arise, because
@@ -66,7 +68,7 @@ other hand, VV with SI scale, but don't have a good support for the
 identification of conflicting values.
 
 
-### Client/Server Example
+### Client-Server Example
 
 Lets illustrate the different VV approaches to track events in a simple
 client/server interaction.
@@ -154,26 +156,27 @@ about events #1, #2 and #3, done by that `id`.
 The novelty of DVV is to provide the context where the last event happened. To
 do that, we separate the last event from the VV itself. This last event is what
 we call the **Dot** (hence *Dotted* Version Vectors). It's a pair `(id,
-counter)`, but only represents the event of that exact counter and not previous
-events. A `(A, 3)` *Dot* only represents the event 3 by A, and nothing else.
-Thus, this *Dot* allows the representation of non-contiguous set of events, per
-value.  Using this, we solve the problem we presented earlier:
+counter)` and only represents the event of that exact counter and not previous
+events; the `(A, 3)` Dot only represents the event 3 by A, and nothing else
+(like event 1 and 2 by A). Thus, this Dot allows the representation of non-
+contiguous set of events, for each sibling. Using this, we can solve our
+previous problem:
 
 ![Dotted Version Vectors][DVV]
 
-A DVV has a VV and a *Dot*. On the first write, since *v1* had no causal
-context, the VV in the DVV is also empty. The *Dot* captures the last event,
-which in this case, is `(A,1)`. When *v2* is written, it also doesn't have
-causal history, so the DVV also has a empty VV. Since we are writing to server
-A, and event 1 by A has already occurred, *v2* is then event 2, thus the Dot
-becomes `(A,2)`. Both values coexist without confusing and preserving their
-background.  Finally, when *v3* arrives with a context of `(A,1)`, we know that
-it already read *v1*, thus it can be safely discarded. We keep *v2* because it
-has events (updates) that *v3* does not know. The DVV for *v3* is the VV given
-by the client, and the *Dot* is the next available event by A : `(A,3)`.
+On the first write, since *v1* had no causal context, the VV in the DVV is also
+empty. The Dot captures the last event, which in this case, is `(A,1)`. When
+*v2* is written, it also doesn't have causal history, so the DVV also has a
+empty VV, but with the Dot `(A,2)`, since its the second event recorded by A for
+this key. Both values coexist without confusion and preserve their context.
+Finally, when *v3* arrives with the context `(A,1)`, we know that it already
+read *v1*, thus it can be safely discarded. We keep *v2* because it has events
+(updates) that *v3* does not know. The DVV for *v3* is the VV given by the
+client, and the Dot is the next available event by A : `(A,3)`.
 
-We have solved this problem by allowing values to "know" non-contiguous set of
-events (however, all DVVs combined should have a set of contiguous events).
+We have solved this problem by allowing values to have non-contiguous set of
+causal events (however, all DVVs combined should have a set of contiguous
+events).
 
 For more information about **VV/SI** vs **VV/CI** vs **DVV** see this article:
 [Dotted Version Vectors: Efficient Causality Tracking for Distributed Key-Value
@@ -183,42 +186,59 @@ Stores][paper dvv]).
 ### The Optimization: Dotted Version Vector Sets (DVVSet)
 
 Dotted Version Vector Sets (DVVSet) solves the exact same problems as DVV, but
-is much more concise and simple. Instead of having a DVV of each conflicting
-value, lets combine all the VV in the DVV and have a global VV, while keeping
-the *Dot*s. Now, instead of:
+is much more concise and simple. Instead of having a DVV of each sibling, lets
+combine all the causal information in the DVVs into a single VV, while retaining
+the Dots information. 
 
-`v2 ~ ([],(A,2)) ; v3 ~ ([(A,1)],(A,3))`
+We really only want two different things from a causality mechanism: (1) assign
+new causal events to new siblings, and (2) remove outdated siblings. To have (1)
+we only need one causal event per sibling (the Dot), and for (2) we only need to
+know which causal events we already know (a global VV), since it doesn't matter
+which sibling obsoletes another one, the end result is the same; thus, we can
+lose the information of the specific causal context of each sibling and store
+only the aggregate of that information.
+
+Now, instead of:
+
+`v2 ~ ([],(A,2))`
+`v3 ~ ([(A,1)],(A,3))`
 ![Dot 1][Dot 1]
 
 like the last result in our previous example, we have:
 
-`v2 ~ (A,2); v3 ~ (A,3) ; (A,1)`
+`v2 ~ (A,2)`
+`v3 ~ (A,3)`
+`global ~ (A,1)`
 ![Dot 2][Dot 2]
 
-So, we have 2 *Dot*s and one global VV. Taking it a step further, we can use
-implicit value placement to represent the *Dot*s like so:
+So, we have 2 Dots and a global VV. Taking it a step further, we can use
+implicit value placement to represent the Dots like so:
 
 `(A,1,[v2,v3])`
 ![Dot 3][Dot 3]
 
-meaning that `(A,1)` is the global VV and `[v2,v3]` are the *Dot*s. Their
-position is what gives us the exact *Dot* for each one. *v2* is the first
-element, so we add 1 to the global VV and have the *Dot* `(A,2)`. *v3* is second
-element, so we add 2 to the global VV and have the *Dot* `(A,3)`.  Well,
-actually, for implementation purposes, it is more practical to have the VV as
-the whole set of events and the list of values reversed. Our example becomes:
+meaning that `(A,1)` is the global VV and `[v2,v3]` are the Dots. They are
+constructed using the id of the triplet they're in, and each counter is
+obtained by their position in the list. *v2* is the first
+element, so we add 1 to the global VV and have the Dot `(A,2)`. *v3* is second
+element, so we add 2 to the global VV and have the Dot `(A,3)`.
+
+Well, actually, for implementation purposes, it is more practical to have the
+VV as the whole set of events and the list of values reversed. Our example
+becomes:
 
 `(A,3,[v3,v2])`
 ![Dot 4][Dot 4]
 
-where each *Dot* is the zero-based index position in the list, minus the counter
-in the VV. Thus, `v3 ~ (A,3-0)` and `v2 ~ (A,3-1)`, which is the same as before.
+where each Dot is the zero-based index position in the list, minus the counter
+of the VV. Thus, `v3 ~ (A,3-0)` and `v2 ~ (A,3-1)`, the same as before.
 
 Recapping, a DVVSet is a set of triplets **(ID, Counter, Values)**: *ID* is a
-unique server identifier; *Counter* is a regular counter, starting at 1 for the
-first event; *Values* is an ordered list of values, where new values are added
-to the head.  Considering the triplet `(I, C, V)`, the *Dot* for each value
-`V[i]` of V (V is zero-based index) is `(I, C-i)`.
+unique server identifier; *Counter* is a regular monotonically increasing
+counter, starting at 1 for the first event; *Values* is an ordered list of
+values, where new values are added to the head.  Considering the triplet `(I, C,
+V)`, the Dot for each value in V at position `i` is `(I, C-i)` (V is zero-based
+index).
 
 Now, let's see how DVVSet would manage in our previous example:
 
@@ -233,29 +253,40 @@ information associated with *v1*, and thus can replace it.
 
 We actually simplified the DVVSet structure a bit for explanation purposes. The
 complete DVVSet is a list of triplets **(ID, Counter, Values)** like before,
-with an additional list of values. We call this the **Anonymous List (AL)**,
-because it stores values that are not associated any *Dot*, but is instead
-related to the global VV. Thus, the only way to supersede values in the AL, is
-to dominate the global VV.
+with an additional set of values. We call this the **Anonymous List (AL)**,
+because it stores values that are not associated any Dot, but is instead related
+to the global VV. Thus, the only way to supersede values in the AL, is to
+dominate the global VV.
+
+##### From VV to DVVSet
+
+If you pay attention, having values in the AL is exactly like having a normal
+VV. This makes the conversion from a DB with VV to DVVSets painless, since we
+can gradually and deterministically transform them with every new write,
+avoiding the need have an offline rewrite of every key.
+
+As an example, the VV `[(A,2), (B,3)]` associated with siblings `{v4,v6}` can be
+represented by this  DVVSet `([(A,2,[]), (B,3,[])], {v4,v6})`.
 
 ##### Reconcile
 
-But, why do we need or want this list? Sometimes we want to simplify values into
-a single value. For example, applying a deterministic conflict resolution
-algorithm, like the reconciliations captured in [Conflict Free Replicated Data
-Types (CRDTs)][paper crdt].
+Sometimes need the flexibility of saying that a value does not have a Dot, like
+when we simplify siblings into a single value. For example, applying a
+deterministic conflict resolution algorithm, like the reconciliations captured
+in [Conflict Free Replicated Data Types (CRDTs)][paper crdt].
 
 `reconcile` is a function that receives a DVVSet and another function. The
-latter receives a list of values and returns a new value (the *winner*). The
-result can be a completely new value (one that was not created directly by a
-client event in the server), thus we don't advance the causal history, and
-instead store it in the AL. Also, the function that return the new value should
-be **deterministic**! If not, we can have inconsistent DVVSets. For example,
-applying `reconcile` with a non-deterministic function to two replicas could
-yield two different values with the same causal history. This is dangerous and
-is a similar situation to VV with SI #1, where we keep equal VVs for different
-values. We also don't store the new value in a preexistent *Dot*, since writes
-that read pre-`reconcile` values would supersede this new value.
+latter takes a list of values and returns a new value (the *winner*). The result
+can be a completely new value (one that was not created directly by a client
+event), thus we don't advance the causal history, and instead store it in the
+AL. We also don't store the winner in a preexistent Dot, since writes that read
+the pre-`reconcile`d DVVSet would supersede the new value.
+
+Also, the function that returns the new value should be **deterministic**! If
+not, we can have incoherent DVVSets. For example, applying `reconcile` with a
+non-deterministic function to two replicas could yield two different values with
+the same causal history. This is dangerous and is a similar situation to VV with
+SI #1, where we keep equal VVs for different values. 
 
 Here is an (Erlang) example using `reconcile`:
 
@@ -268,20 +299,18 @@ Here is an (Erlang) example using `reconcile`:
 
 We pass a function to `reconcile` that adds all values. The returning DVVSet has
 the same causal information, but now has only one value (18), which was not
-present in the previous DVVSet. Thus, we store it in the AL.
+present in the previous DVVSet.
 
 ##### Last Write Wins
 
 There is a special case of reconcile, named **last-write-wins** (lww), where we
 also want to reduce all values to a single one, but that value *must* be already
-present in the DVVSet. Thus, we let the winning value stay in the same *Dot* as
+present in the DVVSet. Thus, we let the winning value stay in the same Dot as
 before.  This function named `lww` has the same parameters as `reconcile`, but
 the function it receives is a **less or equal** [ordering function][ord fun].
 Thus, this `Fun(A,B)` returns `true` if A compares less than or equal to B,
 `false` otherwise. Using that, we keep the greatest value (*note*: we
-preemptively discard values besides the head of a triplet). Only using `lww`, it
-is impossible to have two DVVSet comparing equal and having different values
-(provided that we use a consistent ordering function).
+preemptively discard values besides the first Dot in each triplet).
 
 Here is an (Erlang) example of using `lww` in a DVVSet with values types
 `{Value, Timestamp}`:
@@ -305,7 +334,7 @@ triplet instead of going to the AL, unlike `reconcile`.
 ![Dotted Version Vector Set in a GET][DVVSet get]
 
 When a client wants to read a key/value, we extract the *global* causal
-information (the VV) from DVVSet using a function called `join`. Then, we
+information (a VV) from DVVSet using a function called `join`. Then, we
 extract all values using the function `values`. The VV should be treated as an
 opaque object that should be returned in a subsequent write. In the example,
 `join` gives the VV `(A,3)` and `values` gives the list of values `[v2,v3]`.
@@ -317,14 +346,13 @@ opaque object that should be returned in a subsequent write. In the example,
 
 When a client wants to write to a key/value, he gives a value and a VV. We first
 create a new DVVSet to represent the new write, using `new`. It returns a DVVSet
-with that VV inside and the new value in the AL.
-Then we call a function `update` on that new DVVSet and the server's DVVSet. It
-synchronizes both to discard old values on the server. In this case, *v1* is
-outdated because the client VV already knows (A,1), therefore we discard it.
-After this, we advance the causal information in DVVSet and insert a new *Dot*
-to reflect the new event. In the example, we advance the VV from `(A,2)` to
-`(A,3)` and create a *Dot* for *v3*.
-
+with the same causal information as the VV and the new value in the AL. Then, we
+call a function `update` on that new DVVSet and the server's DVVSet. It
+synchronizes both, discarding old values. In this case, *v1* is outdated because
+the client VV already knows (A,1), therefore we discard it. After this, we
+advance the causal information in DVVSet and insert a new Dot to reflect the new
+event. In the example, we advance the VV from `(A,2)` to `(A,3)` and create a
+Dot for *v3*.
 
 
 ## Real World with Riak
@@ -333,19 +361,18 @@ We implemented DVVSet in our fork of [Basho's][riak site] [Riak][riak github]
 NoSQL database, as an alternative to their VV implementation, as a proof of
 concept.
 
-The Riak version using VV is here:
-https://github.com/ricardobcl/riak_kv/tree/master
-
-The Riak version using DVVset is here:
-https://github.com/ricardobcl/riak_kv/tree/dvvset
+The Riak version using VV is
+[here](https://github.com/ricardobcl/riak_kv/tree/master), and the DVVset is
+[here](https://github.com/ricardobcl/riak_kv/tree/dvvset).
+Or see a diff [here](https://github.com/basho/riak_kv/pull/572/files).
 
 Lets take a look at 2 different scenarios, where we can clearly see real world
 advantages of DVVSet:
 
 * **Scenario 1**
-    1. client C1 writes and reads;
-    2. some other client writes a new value (without causal information);
-    3. repeat 1 and 2.
+    1. Client C1 writes, then reads;
+    2. Meanwhile, another client writes a new value (without causal information);
+    3. Repeat 1 and 2.
 
     Version Vector:
 ![VV with conflicts #4][VV 4]
@@ -354,9 +381,9 @@ advantages of DVVSet:
 ![Dotted Version Vector Set #4][DVVSet 2]
 
 * **Scenario 2**
-    1. client A writes and reads;
-    2. client B writes and reads;
-    3. repeat 1 and 2.
+    1. Client A writes, then reads;
+    2. Next, client B writes, then reads;
+    3. Repeat 1 and 2.
 
     Version Vector:
 ![VV with conflicts #5][VV 5]
@@ -407,11 +434,11 @@ Siblings: 2
 Values: v101 v100
 ```
 
-The test code can be found here: https://gist.github.com/ricardobcl/4992839
-
 As we can see, both scenarios have similar results: with VV you have an
 exploding number of siblings in your Riak database; with DVVSet you have always
 2 or 3 siblings.
+
+The test code can be found [here](https://gist.github.com/ricardobcl/4992839).
 
 
 ## How to Use
@@ -424,7 +451,7 @@ case:
 
     ```Erlang
         %% create a new DVVSet for the new value V
-        NewDVVSet = dvvset:new([V]),
+        NewDVVSet = dvvset:new(V),
         %% update the causal history of DVVSet using the server identifier
         DVVSet = dvvset:update(NewDVVSet, ServerID),
         %% store DVVSet...
@@ -447,7 +474,7 @@ case:
 
     ```Erlang
         %% create a new DVVSet for the new value V, using the client's version vector VV
-        NewDVVSet = dvvset:new(VV, [V]),
+        NewDVVSet = dvvset:new(VV, V),
         %% update the new DVVSet with the local server DVVSet and the server ID
         DVVSet = dvvset:update(NewDVVSet, LocalDVVSet, ServerID),
         %% store DVVSet...
@@ -480,7 +507,7 @@ entropy (keeps replicas up-to-date)**
 
     ```Erlang
         %% create a new DVVSet for the new value, using the client's version vector
-        NewDVVSet = dvvset:new(VV, [V]),
+        NewDVVSet = dvvset:new(VV, V),
         %% update the new DVVSet with the local server DVVSet and the server ID
         UpdDVVSet = dvvset:update(NewDVVSet, LocalDVVSet, ServerID),
         %% preserve the causal information of UpdDVVSet, but keep only 1 value 
@@ -488,13 +515,13 @@ entropy (keeps replicas up-to-date)**
         DVVSet = dvvset:lww(F, UpdDVVSet)
         %% store DVVSet...
     ```
-    We could do only `DVVSet = dvvset:new([V])` and write DVVSet immediately,
+    We could do only `DVVSet = dvvset:new(V)` and write DVVSet immediately,
     saving the cost of a local read, but generally its safer to preserve causal
     information, especially if the *lww* policy can be turned on and off per
     request or changed during a key lifetime;
 
 
-## Different flavors of DVVSets
+## DVVSets Variations
 
 ### Removing old entries
 
@@ -537,6 +564,7 @@ your code:
 1. Call `prune` with MAX after calling `update` in the coordinating node; 
 2. When locally updating / synchronizing a new version (for a replicated PUT, or
 anti-entropy), call `update_time` with the local node ID after calling `sync`.
+
 
 [dvvset original]: https://github.com/ricardobcl/Dotted-Version-Vectors/blob/master/dvvset/dvvset.erl
 [dvvset prune]: https://github.com/ricardobcl/Dotted-Version-Vectors/blob/master/dvvset/dvvset_prune.erl

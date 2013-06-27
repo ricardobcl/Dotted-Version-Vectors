@@ -78,23 +78,25 @@
 
 
 %% @doc Constructs a new clock set without causal history,
-%% and receives a list of values that gos to the anonymous list.
+%% and receives one value that goes to the anonymous list.
 -spec new(value()) -> clock().
 new(V) -> {[], [V]}.
 
+%% @doc Same as new/1, but receives a list of values, instead of a single value.
 -spec new_list([value()]) -> clock().
 new_list(Vs) when is_list(Vs) -> {[], Vs};
 new_list(V) -> {[], [V]}.
 
 %% @doc Constructs a new clock set with the causal history
 %% of the given version vector / vector clock,
-%% and receives a list of values that gos to the anonymous list.
-%% The version vector SHOULD BE a direct result of join/1.
+%% and receives one value that goes to the anonymous list.
+%% The version vector SHOULD BE the output of join/1.
 -spec new(vector(), value()) -> clock().
 new(VV, V) ->
     VVS = lists:sort(VV), % defense against non-order preserving serialization
     {[{I, N, [], T} || {I, N, T} <- VVS], [V]}.
 
+%% @doc Same as new/2, but receives a list of values, instead of a single value.
 -spec new_list(vector(), [value()]) -> clock().
 new_list(VV, Vs) when is_list(Vs) ->
     VVS = lists:sort(VV), % defense against non-order preserving serialization

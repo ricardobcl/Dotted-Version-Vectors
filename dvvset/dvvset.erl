@@ -40,6 +40,8 @@
 
 -export([new/1,
          new/2,
+         new_list/1,
+         new_list/2,
          sync/1,
          join/1,
          update/2,
@@ -73,20 +75,30 @@
 
 
 %% @doc Constructs a new clock set without causal history,
-%% and receives a list of values that gos to the anonymous list.
--spec new([value()]) -> clock().
-new(Vs) when is_list(Vs) -> {[], Vs};
+%% and receives one value that goes to the anonymous list.
+-spec new(value()) -> clock().
 new(V) -> {[], [V]}.
+
+%% @doc Same as new/1, but receives a list of values, instead of a single value.
+-spec new_list([value()]) -> clock().
+new_list(Vs) when is_list(Vs) -> {[], Vs};
+new_list(V) -> {[], [V]}.
 
 %% @doc Constructs a new clock set with the causal history
 %% of the given version vector / vector clock,
-%% and receives a list of values that gos to the anonymous list.
-%% The version vector SHOULD BE a direct result of join/1.
--spec new(vector(), [value()]) -> clock().
-new(VV, Vs) when is_list(Vs) ->
+%% and receives one value that goes to the anonymous list.
+%% The version vector SHOULD BE the output of join/1.
+-spec new(vector(), value()) -> clock().
+new(VV, V) ->
+    VVS = lists:sort(VV), % defense against non-order preserving serialization
+    {[{I, N, []} || {I, N} <- VVS], [V]}.
+
+%% @doc Same as new/2, but receives a list of values, instead of a single value.
+-spec new_list(vector(), [value()]) -> clock().
+new_list(VV, Vs) when is_list(Vs) ->
     VVS = lists:sort(VV), % defense against non-order preserving serialization
     {[{I, N, []} || {I, N} <- VVS], Vs};
-new(VV, V) -> new(VV, [V]).
+new_list(VV, V) -> new_list(VV, [V]).
 
 %% @doc Synchronizes a list of clocks using sync/2.
 %% It discards (causally) outdated values, 
@@ -234,7 +246,7 @@ map(F, {C,Vs}) ->
 -spec reconcile(Winner::fun(([value()]) -> value()), clock()) -> clock().
 reconcile(F, C) ->
     V = F(values(C)),
-    new(join(C),[V]).
+    new(join(C), V).
 
 %% @doc Returns the latest value in the clock set,
 %% according to function F(A,B), which returns *true* if 
@@ -252,7 +264,7 @@ last(F, C) ->
 lww(F, C={E,_}) ->
     case find_entry(F, C) of
         {id, I, V}      -> {join_and_replace(I, V, E),[]};
-        {anonym, _, V}  -> new(join(C),[V])
+        {anonym, _, V}  -> new(join(C), V)
     end.
 
 %% find_entry/2 - Private function
@@ -301,7 +313,7 @@ join_and_replace(Ir, V, C) ->
 
 
 join_test() ->
-    A  = new([v1]),
+    A  = new(v1),
     A1 = update(A,a),
     B  = new(join(A1),[v2]),
     B1 = update(B, A1, b),
@@ -311,11 +323,11 @@ join_test() ->
     ok.
 
 update_test() ->
-    A0 = update(new([v1]),a),
-    A1 = update(new(join(A0),[v2]), A0, a),
-    A2 = update(new(join(A1),[v3]), A1, b),
-    A3 = update(new(join(A0),[v4]), A1, b),
-    A4 = update(new(join(A0),[v5]), A1, a),
+    A0 = update(new(v1),a),
+    A1 = update(new_list(join(A0),[v2]), A0, a),
+    A2 = update(new_list(join(A1),[v3]), A1, b),
+    A3 = update(new_list(join(A0),[v4]), A1, b),
+    A4 = update(new_list(join(A0),[v5]), A1, a),
     ?assertEqual( A0 , {[{a,1,[v1]}],[]}                ),
     ?assertEqual( A1 , {[{a,2,[v2]}],[]}                ),
     ?assertEqual( A2 , {[{a,2,[]}, {b,1,[v3]}],[]}      ),
@@ -325,11 +337,11 @@ update_test() ->
 
 sync_test() ->
     X   = {[{x,1,[]}],[]},
-    A   = update(new([v1]),a),
-    Y   = update(new([v2]),b),
-    A1  = update(new(join(A),[v2]), a),
-    A3  = update(new(join(A1),[v3]), b),
-    A4  = update(new(join(A1),[v3]), c),
+    A   = update(new(v1),a),
+    Y   = update(new_list([v2]),b),
+    A1  = update(new_list(join(A),[v2]), a),
+    A3  = update(new_list(join(A1),[v3]), b),
+    A4  = update(new_list(join(A1),[v3]), c),
     F   = fun (L,R) -> L>R end,
     W   = {[{a,1,[]}],[]},
     Z   = {[{a,2,[v2,v1]}],[]},
@@ -349,10 +361,10 @@ sync_test() ->
     ok.
 
 syn_update_test() ->
-    A0  = update(new([v1]), a),             % Mary writes v1 w/o VV
+    A0  = update(new_list([v1]), a),             % Mary writes v1 w/o VV
     VV1 = join(A0),                         % Peter reads v1 with version vector (VV)
-    A1  = update(new([v2]), A0, a),         % Mary writes v2 w/o VV
-    A2  = update(new(VV1,[v3]), A1, a),     % Peter writes v3 with VV from v1
+    A1  = update(new_list([v2]), A0, a),         % Mary writes v2 w/o VV
+    A2  = update(new_list(VV1,[v3]), A1, a),     % Peter writes v3 with VV from v1
     ?assertEqual( VV1 , [{a,1}]                          ),
     ?assertEqual( A0  , {[{a,1,[v1]}],[]}                ),
     ?assertEqual( A1  , {[{a,2,[v2,v1]}],[]}             ),
@@ -361,7 +373,7 @@ syn_update_test() ->
     ok.
 
 event_test() ->
-    {A,_} = update(new([v1]),a),
+    {A,_} = update(new(v1),a),
     ?assertEqual( event(A,a,v2) , [{a,2,[v2,v1]}]           ),
     ?assertEqual( event(A,b,v2) , [{a,1,[v1]}, {b,1,[v2]}]  ),
     ok.
@@ -393,12 +405,12 @@ reconcile_test() ->
     ok.
 
 less_test() ->
-    A  = update(new(v1),[a]),
-    B  = update(new(join(A),[v2]), a),
-    B2 = update(new(join(A),[v2]), b),
-    B3 = update(new(join(A),[v2]), z),
-    C  = update(new(join(B),[v3]), A, c),
-    D  = update(new(join(C),[v4]), B2, d),
+    A  = update(new_list(v1),[a]),
+    B  = update(new_list(join(A),[v2]), a),
+    B2 = update(new_list(join(A),[v2]), b),
+    B3 = update(new_list(join(A),[v2]), z),
+    C  = update(new_list(join(B),[v3]), A, c),
+    D  = update(new_list(join(C),[v4]), B2, d),
     ?assert(    less(A,B)  ),
     ?assert(    less(A,C)  ),
     ?assert(    less(B,C)  ),
@@ -426,7 +438,7 @@ equal_test() ->
     ok.
 
 size_test() ->
-    ?assertEqual( 1 , ?MODULE:size(new([v1]))                                       ),
+    ?assertEqual( 1 , ?MODULE:size(new_list([v1]))                                       ),
     ?assertEqual( 5 , ?MODULE:size({[{a,4,[v5,v0]},{b,0,[]},{c,1,[v3]}],[v4,v1]})   ),
     ok.
 
