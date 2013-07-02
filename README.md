@@ -457,7 +457,18 @@ case:
         %% store DVVSet...
     ```
 
-2. **A client reads a value**
+2. **A client writes an updated value and an opaque (unaltered) version vector
+(obtained from a previous read on this key)**
+
+    ```Erlang
+        %% create a new DVVSet for the new value V, using the client's context
+        NewDVVSet = dvvset:new(Context, V),
+        %% update the new DVVSet with the local server DVVSet and the server ID
+        DVVSet = dvvset:update(NewDVVSet, LocalDVVSet, ServerID),
+        %% store DVVSet...
+    ```
+
+3. **A client reads a value**
 
     ```Erlang
         %% synchronize from different server DVVSet
@@ -467,17 +478,6 @@ case:
         %% get the causal information (version vector)
         VV = dvvset:join(DVVSet),
         %% return both to client...
-    ```
-
-3. **A client writes an updated value and an opaque (unaltered) version vector
-(obtained from a previous read on this key)**
-
-    ```Erlang
-        %% create a new DVVSet for the new value V, using the client's version vector VV
-        NewDVVSet = dvvset:new(VV, V),
-        %% update the new DVVSet with the local server DVVSet and the server ID
-        DVVSet = dvvset:update(NewDVVSet, LocalDVVSet, ServerID),
-        %% store DVVSet...
     ```
 
 4. **A replica receives a DVVSet from the coordinator to (synchronize and) store
@@ -506,13 +506,13 @@ entropy (keeps replicas up-to-date)**
 6. **A client writes a new value V with the *last-write-wins* policy**
 
     ```Erlang
-        %% create a new DVVSet for the new value, using the client's version vector
-        NewDVVSet = dvvset:new(VV, V),
+        %% create a new DVVSet for the new value, using the client's context
+        NewDVVSet = dvvset:new(Context, V),
         %% update the new DVVSet with the local server DVVSet and the server ID
         UpdDVVSet = dvvset:update(NewDVVSet, LocalDVVSet, ServerID),
         %% preserve the causal information of UpdDVVSet, but keep only 1 value 
         %% according to the ordering function F
-        DVVSet = dvvset:lww(F, UpdDVVSet)
+        DVVSet = dvvset:lww(F, UpdDVVSet),
         %% store DVVSet...
     ```
     We could do only `DVVSet = dvvset:new(V)` and write DVVSet immediately,
@@ -565,6 +565,17 @@ your code:
 2. When locally updating / synchronizing a new version (for a replicated PUT, or
 anti-entropy), call `update_time` with the local node ID after calling `sync`.
 
+### Consecutive and concurrent writes
+
+    ```Erlang
+        %% create a new DVVSet for the new value V, using the client's context
+        NewDVVSet = dvvset:new(Context, V),
+        %% update the new DVVSet with the local server DVVSet and the server ID
+        Dot = dvvset:event(NewDVVSet, LocalDVVSet, ServerID),
+        %% acknowledge the write with Dot
+        DVVSet = dvvset:sync([LocalDVVSet, Dot]),
+        %% store DVVSet...
+    ```
 
 [dvvset original]: https://github.com/ricardobcl/Dotted-Version-Vectors/blob/master/dvvset/dvvset.erl
 [dvvset prune]: https://github.com/ricardobcl/Dotted-Version-Vectors/blob/master/dvvset/dvvset_prune.erl

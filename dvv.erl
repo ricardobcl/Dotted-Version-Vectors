@@ -1,55 +1,56 @@
+%%%-------------------------------------------------------------------
+%%%
+%%% File:      dvv.erl
+%%%
+%%% @author    Ricardo Tomé Gonçalves <tome.wave@gmail.com>
+%%%
+%%% @copyright 2012 Ricardo Tomé Gonçalves 
+%%%
+%%% @copyright The MIT License (MIT)
+%%% Copyright (C) 2013
+%%%
+%%% Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+%%%
+%%% The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+%%%
+%%% THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+%%%
+%%% @doc  
+%%%  A simple Erlang implementation of Dotted Version Vectors.
+%%%  Some functions were adapted from the vclock.erl file (for Version Vectors) of Basho's Riak.
+%%% @end  
+%%%
+%%% @reference Dotted Version Vectors: Logical Clocks for Optimistic Replication
+%%% URL: http://arxiv.org/abs/1011.5808
+%%%
+%%%-------------------------------------------------------------------
 
-%%-------------------------------------------------------------------
-%%
-%% File:      dottedvv.erl
-%%
-%% @author    Ricardo Tomé Gonçalves <tome.wave@gmail.com>
-%%
-%% @copyright 2012 Ricardo Tomé Gonçalves 
-%%
-%% This file is provided to you under the Apache License,
-%% Version 2.0 (the "License"); you may not use this file
-%% except in compliance with the License.  You may obtain
-%% a copy of the License at
-%%
-%%   http://www.apache.org/licenses/LICENSE-2.0
-%%
-%% Unless required by applicable law or agreed to in writing,
-%% software distributed under the License is distributed on an
-%% "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-%% KIND, either express or implied.  See the License for the
-%% specific language governing permissions and limitations
-%% under the License.
-%%
-%% @doc  
-%%  A simple Erlang implementation of Dotted Version Vectors.
-%%  Some functions were adapted from the vclock.erl file (for Version Vectors) of Basho's Riak.
-%% @end  
-%%
-%% @reference Dotted Version Vectors: Logical Clocks for Optimistic Replication
-%% URL: http://arxiv.org/abs/1011.5808
-%%
-%%-------------------------------------------------------------------
+-module(dvv).
 
--module(dottedvv).
-
--author('Ricardo Tome Goncalves <tome@di.uminho.pt>').
-
--export([fresh/0,strict_descends/2,descends/2,sync/2,update/3,equal/2,increment/2,merge/1]).
+-export([
+            new/0,
+            strict_descends/2,
+            descends/2,
+            sync/2,
+            update/3,
+            equal/2,
+            increment/2,
+            merge/1,
+            ids/1,
+            get_timestamp/2
+        ]).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
-
--export_type([dottedvv/0, timestamp/0]).
-
+-export_type([dvv/0, timestamp/0]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% STRUCTURE
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
--type dottedvv() :: {vector(), dot()}.
+-type dvv() :: {vector(), dot()} | {}.
 -type vector() :: [dot()].
 -type dot() :: {id(), {counter(), timestamp()}} | null.
 
@@ -58,22 +59,14 @@
 -type timestamp() :: integer().
 
 
-
-
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% FUNCTIONS
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-
-
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% @doc Returns a new dottedvv.
--spec fresh() -> dottedvv().
-
-fresh() -> {}.
-
+% @doc Returns a new dvv.
+-spec new() -> dvv().
+new() -> {}.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -83,10 +76,14 @@ fresh() -> {}.
 % Sc = Set of clocks from the Client
 % Sr = Set of clocks from the Replica
 % Id = Id that will be incremented (Replica id)
--spec update(Sc :: [dottedvv()], Sr :: [dottedvv()], IDr :: id()) -> dottedvv().
+-spec update([dvv()], [dvv()], id()) -> dvv().
+update(Sc, [{}], Id) -> 
+    update2(merge(Sc), {}, Id);
+update(Sc, Sr, Id) -> 
+    update2(merge(Sc), Sr, Id).
 
-update(Sc, Sr, Id) -> update2(merge(Sc), Sr, Id).
-update2({}, {}, Id) -> {[], {Id, {1 , new_timestamp()}}};
+update2({}, {}, Id) -> 
+    {[], {Id, {1 , new_timestamp()}}};
 update2({}, Sr, Id) -> 
     {Max, _TS2} = max_counter(Id, Sr),
     Dot = {Id, {Max + 1 , new_timestamp()}},
@@ -96,27 +93,25 @@ update2(Sc, Sr, Id) ->
     {Max, _TS2} = max_counter(Id, Sr),
     Dot = {Id, {Max + 1 , new_timestamp()}},
     {Sc2, Dot}.
-    
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % @doc Increment DottedVV at Node.
--spec increment(id(), dottedvv()) -> dottedvv().
+-spec increment(id(), dvv()) -> dvv().
 increment(Id, C) ->
-    update(C, C, Id).
-
-
+    update([C], [C], Id).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % @doc Return true if Va is a direct descendant of Vb, else false --> S1 >= S2
--spec descends(dottedvv(), dottedvv()) -> boolean().
-descends(A, B) -> equal(A, B) orelse strict_descends(A, B).
+-spec descends(dvv(), dvv()) -> boolean().
+descends(A, B) ->
+    equal(A, B) orelse strict_descends(A, B).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % @doc Return true if Va is a direct descendant of Vb, else false --> S1 > S2
--spec strict_descends(dottedvv(), dottedvv()) -> boolean().
+-spec strict_descends(dvv(), dvv()) -> boolean().
 strict_descends([{}], _) -> false;
 strict_descends({}, _) -> false;
 strict_descends(_, [{}]) -> true;
@@ -148,13 +143,10 @@ descends3(Va, Vb) ->
         end.
 
 
-            
-
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % @doc Merges the set of clocks, removing redundant information (old entries)
 % We assume that all clocks togethor have no "holes"
--spec merge([dottedvv()]) -> dottedvv() | {}.
+-spec merge([dvv()]) -> dvv().
 merge([]) -> {};
 merge({}) -> {};
 merge([{}|S]) -> merge(S);
@@ -185,20 +177,14 @@ merge(V=[{Node1,{Ctr1,TS1}=CT1}=NCT1|VClock],
             merge(VClock, NClock, [{Node1,CT}|AccClock])
     end.
 
-
-
 %% AUX
 sort_and_merge_dot(S) -> 
     {S2, null} = merge_dot(S),
     lists:keysort(1, S2).
-    
 
 %% AUX 2
 merge_dot({S, null}) -> {S, null};
 merge_dot({S, {Id, C}}) -> {lists:keystore(Id, 1, S, {Id, C}), null}.
-
-
-
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -207,7 +193,7 @@ merge_dot({S, {Id, C}}) -> {lists:keystore(Id, 1, S, {Id, C}), null}.
 %       It returns a set of concurrent clocks, 
 %       each belonging to one of the sets, and that 
 %       together cover both sets while discarding obsolete knowledge.
--spec sync([dottedvv()], [dottedvv()]) -> [dottedvv()].
+-spec sync([dvv()], [dvv()]) -> [dvv()].
 sync({}, S) -> S;
 sync(S, {}) -> S;
 sync(S1={_,_}, S2) -> sync(S2, [S1]);
@@ -218,13 +204,10 @@ sync(S1, S2) ->
     lists:reverse(NotLeq, NotLess).
 
 
-
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%% ids(X) -> [id]
-% @doc Return the list of all nodes that have ever incremented dottedvv.
--spec ids(dottedvv()) -> [id()].
-
+% @doc Return the list of all nodes that have ever incremented dvv.
+-spec ids(dvv()) -> [id()].
 ids(S) when is_list(S) -> ids2(merge(S));
 ids(S) -> sets:to_list(sets:from_list(ids2(S))).
 
@@ -236,22 +219,19 @@ ids2({S, _}) -> [X || {X,{_,_}} <- S];
 ids2(S) when is_list(S) -> [X || {X,{_,_}} <- S].
 
 
-
-
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%% [S]r -> max(Sr)
 %% Note: Could be improved if we checked all dots before merging (if it is a set)
--spec max_counter(id(), [dottedvv()]) -> counter().
-
-max_counter(Id, S) when is_list(S) -> max_counter(Id, merge(S));
-max_counter(Id, S) -> get_counter(Id, S).
-
+-spec max_counter(id(), dvv()) -> {counter(), timestamp()}.
+max_counter(Id, S) when is_list(S) -> 
+    max_counter(Id, merge(S));
+max_counter(Id, S) -> 
+    get_counter(Id, S).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% @doc Get the counter value and timestamp in dottedvv set from Id.
--spec get_counter(id(), dottedvv()) -> counter().
+% @doc Get the counter value and timestamp in dvv set from Id.
+-spec get_counter(id(), dvv()) -> {counter(), timestamp()}.
 get_counter(_, {}) -> {0,0};
 get_counter(Id, {_, {Id, C}}) -> C;
 get_counter(Id, {S, _}) ->
@@ -261,10 +241,9 @@ get_counter(Id, {S, _}) ->
     end.
 
 
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% @doc Get the timestamp value in a dottedvv set from Id.
--spec get_timestamp(id(), dottedvv()) -> timestamp() | undefined.
+% @doc Get the timestamp value in a dvv set from Id.
+-spec get_timestamp(id(), dvv()) -> timestamp() | undefined.
 get_timestamp(_, {}) -> undefined;
 get_timestamp(Id, {_,{Id,{_,TS}}}) -> TS;
 get_timestamp(Id, {S,_}) ->
@@ -272,8 +251,6 @@ get_timestamp(Id, {S,_}) ->
         {_, {_, TS}} -> TS;
         false -> undefined
     end.
-
-
 
 
 -define(DAYS_FROM_GREGORIAN_BASE_TO_EPOCH, (1970*365+478)).
@@ -291,12 +268,9 @@ new_timestamp() ->
     ?SECONDS_FROM_GREGORIAN_BASE_TO_EPOCH + MegaSeconds*1000000 + Seconds.
 
 
-
-
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% @doc Compares two dottedvvs for equality.
--spec equal(Dottedvv :: [dottedvv()], Dottedvv :: [dottedvv()]) -> boolean().
+% @doc Compares two dvvs for equality.
+-spec equal([dvv()] | dvv(), [dvv()] | dvv()) -> boolean().
 equal([], B) -> equal({}, B);
 equal(A, []) -> equal(A, {});
 equal([A], B) -> equal(A, B);
@@ -310,18 +284,11 @@ equal({_,_}, [_]) -> false;
 equal(A, B) -> 
     contains(A, B) andalso contains(B, A).
 
-
 contains([], _) -> true;
 contains({_,_}, []) -> false;
 contains({SA,DA}, {SB,DB}) -> DA =:= DB andalso lists:sort(SA) =:= lists:sort(SB);
 contains(A={_,_}, [H|T]) -> equal(A,H) orelse contains(A, T);
 contains([H|T], B) -> contains(H,B) andalso contains(T,B).
-
-
-
-
-
-
 
 
 
@@ -333,8 +300,8 @@ contains([H|T], B) -> contains(H,B) andalso contains(T,B).
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % doc Serves as both a trivial test and some example code.
 example_test() ->
-    A = fresh(),
-    B = fresh(),
+    A = new(),
+    B = new(),
     A1 = increment(a, A),
     B1 = increment(b, B),
     true = strict_descends(A1,A),
@@ -350,15 +317,12 @@ example_test() ->
     false = strict_descends(B1, A1),
     ok.
 
-
-
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % doc Unit Tests for UPDATE
 
 %% NOTE: increment(id,X) = update(X,X,id)
 update_test() ->
-    C0 = fresh(),
+    C0 = new(),
     C1 = increment(a, C0),
     {[], {a,{1,_}}} = C1, 
     C2 = increment(a, C1),
@@ -386,10 +350,6 @@ update_test() ->
     C9 = update(C8f, [C8a, C8b, C8c, C8d, C8f], a),
     {[{a,{5,_}},{b,{6,_}}], {a,{6,_}}} = C9, 
     ok.
-
-
-
-
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % doc Unit Tests for DESCENDS
@@ -421,7 +381,6 @@ descends_test() ->
     true = descends(C8a, C8a),
     false = strict_descends(C8b, C8b),
     true = descends(C8b, C8b),
-%   io:format("~nCa ~p~nCb ~p~n",[C8a,C8b]),
     false = strict_descends(C8a, C8b),
     false = strict_descends(C8b, C8a),
     false = strict_descends(C1, C8a),
@@ -441,12 +400,8 @@ accessor_test() ->
     ?assertEqual(undefined, get_timestamp(<<"3">>, C)),
     ?assertEqual([<<"1">>, <<"2">>], lists:sort(ids(C))).
 
-
-
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % doc Unit Tests for MERGE
-
 
 merge_test() ->
     C1 = {[{<<"1">>, {1, 1}},
@@ -454,7 +409,7 @@ merge_test() ->
             {<<"4">>, {4, 4}}},
     C2 = {[{<<"3">>, {3, 3}}],
            {<<"4">>, {3, 3}}},
-    ?assertEqual({}, merge(fresh())),
+    ?assertEqual({}, merge(new())),
     {C3,null} = merge([C1,C2]),
     ?assertEqual([{<<"1">>,{1,1}},{<<"2">>,{2,2}},{<<"3">>,{3,3}},{<<"4">>,{4,4}}],
                  lists:sort(C3)).
@@ -481,13 +436,8 @@ merge_same_id_test() ->
                  lists:sort(C3)).
 
 
-
-
-
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % doc Unit Tests for SYNC
-
 
 sync_test() ->
     C1 = {[], {a,{1,1}}},
@@ -518,7 +468,6 @@ sync_test() ->
     ok.
 
 
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % doc Unit Tests for EQUAL
 
@@ -545,7 +494,7 @@ equal_test() ->
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% doc Unit Tests for others fucntions
+% doc Unit Tests for others functions
 
 %% TODO
 
