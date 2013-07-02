@@ -557,28 +557,133 @@ recently save new versions for this key. Thus, when pruning, we should remove
 this entries first, since they are from the least participative nodes (or
 retired nodes).
 
+#### Usage
+
 If you want to use this version of DVVSet, then use the file
 [dvvset_prune][dvvset prune] instead of [dvvset][dvvset original]. Then, add two function to
 your code:
 
-1. Call `prune` with MAX after calling `update` in the coordinating node; 
-2. When locally updating / synchronizing a new version (for a replicated PUT, or
-anti-entropy), call `update_time` with the local node ID after calling `sync`.
-
-### Consecutive and concurrent writes
-
+1. Call `prune` with MAX after calling `update` in the coordinating node.
+    
     ```Erlang
         %% create a new DVVSet for the new value V, using the client's context
         NewDVVSet = dvvset:new(Context, V),
         %% update the new DVVSet with the local server DVVSet and the server ID
-        Dot = dvvset:event(NewDVVSet, LocalDVVSet, ServerID),
-        %% acknowledge the write with Dot
+        DVVSet0 = dvvset:update(NewDVVSet, LocalDVVSet, ServerID),
+        %% call prune with MAX = 5
+        DVVSet1 = dvvset:prune(DVVSet0, 5),
+        %% store DVVSet1...
+    ```
+
+2. When locally updating / synchronizing a new version (for a replicated PUT, or
+anti-entropy), call `update_time` with the local node ID after calling `sync`.
+
+    ```Erlang
+        %% synchronize the new DVVSet with the local DVVSet
+        DVVSet0 = dvvset:sync([NewDVVSet, LocalDVVSet]),
+        %% call update_time to flag this node as "alive"
+        DVVSet1 = dvvset:update_time(DVVSet0, ServerID),
+        %% store DVVSet...
+    ```
+
+### Consecutive and concurrent writes
+
+A write can acknowledge to the client if it succeeded and also return the causal
+information for that key, without the siblings, which avoid having to read from
+the system to do a new write. This returned context after a successful put has
+one limitation: if the server ends up with siblings after the write, the
+returned context cannot be used to do new writes because we have to read those
+siblings, otherwise new we would overwrite siblings without even reading them,
+causing information loss for other clients.
+
+The point here is that the context returned from a put should represent the
+causal information known by that write, including the new value, and not contain
+causal information about siblings created concurrently.
+
+We modified DVVSets to support consecutive and concurrent writes, at the expense
+of losing some compactness of the original DVVSet. The file
+[dvvset\_put\_ack][dvvset ack put] implements this version. Lets call it
+*DVVSetAck* below, for brevity.
+
+The main difference between them is that DVVSetAck supports non-contiguous
+causal information. Thus, we can now acknowledge a write to the client with the
+same context provided for that operation, plus the a new single dot that
+represents the new value/sibling written. With this, multiple clients can do
+consecutive writes without having to read if siblings were generated from other
+sources. Clients now don't even have to check if there are siblings, since we
+don't return contexts that overwrite siblings that were not read/write from this
+client.
+
+Now, each entry in the DVVSet in 4-tuple `(id, base, dots, values)`. The `base`
+represents the contiguous causal events without values, the `dots` are events (dots)
+without values that are not contiguous with the `base`. Finally, `values` are
+the events (dots) with values, represented by tuples `(dot, value)`.
+
+
+#### Example
+
+With DVVSet:
+![DVVSet Ack][DVVSet Ack]
+
+With DVVSetAck:
+![DVVSetAck put][DVVSetAck Put]
+
+Under DVVSet (or VV), if there is a conflict, we must read all siblings, because
+DVVSet (and VV) only return as context a contiguous causal history. We observe
+this case in the example: with DVVSet, when client C2 wants to write *v3* it
+can't do it immediately, because the acknowledge from writing *v2* tells him
+that there are siblings, thus writing *v3* with that context would overwrite
+them (in this case *v1*). Thus, C2 must read that key to obtain all the siblings
+and their respective context, before writing *v3*. 
+
+**It forces the client to resolve conflicts before being able to write again!**
+
+With our modification to DVVSet, we can write multiple times without doing
+explicit reads, as we can see from the second put by client C2, where we
+overwrite *v2* without reading or losing the sibling *v1*.
+
+#### Usage
+
+We have a new function `event` that is used exactly as `update`, but returns a
+DVVSet containing only the context and the new dot for the value. Now we can
+call `join` to extract the causal information and return that as acknowledge
+context to the client. Finally, we call `sync` to synchronize with the local
+DVVSet.
+
+The function `update` still exists and can be used as before. All it does is
+encapsulate `event` and `sync` in one function.
+
+1. **A client writes a new value**
+
+    ```Erlang
+        %% create a new DVVSet for the new value V
+        NewDVVSet = dvvset:new(V),
+        %% update the causal history of DVVSet using the server identifier
+        Dot = dvvset:event(NewDVVSet, ServerID),
+        AckContext = join(Dot),
+        %% acknowledge the write with the context AckContext
         DVVSet = dvvset:sync([LocalDVVSet, Dot]),
         %% store DVVSet...
     ```
 
-[dvvset original]: https://github.com/ricardobcl/Dotted-Version-Vectors/blob/master/dvvset/dvvset.erl
-[dvvset prune]: https://github.com/ricardobcl/Dotted-Version-Vectors/blob/master/dvvset/dvvset_prune.erl
+2. **A client writes an updated value and an opaque (unaltered) version vector
+(obtained from a previous read on this key or from a put's ack)**
+
+    ```Erlang
+        %% create a new DVVSet for the new value V, using the client's context
+        NewDVVSet = dvvset:new(Context, V),
+        %% create a new DVVSet with a new Dot for the new value
+        %% the result is only the previous context plus a new dot
+        Dot = dvvset:event(NewDVVSet, LocalDVVSet, ServerID),
+        AckContext = join(Dot),
+        %% acknowledge the write with the context AckContext
+        DVVSet = dvvset:sync([LocalDVVSet, Dot]),
+        %% store DVVSet...
+    ```
+
+[dvvset original]: https://github.com/ricardobcl/Dotted-Version-Vectors/blob/master/dvvset.erl
+[dvvset prune]: https://github.com/ricardobcl/Dotted-Version-Vectors/blob/master/dvvset_prune.erl
+[dvvset ack put]: https://github.com/ricardobcl/Dotted-Version-Vectors/blob/master/dvvset_put_ack.erl
 [paper dvv]: http://gsd.di.uminho.pt/members/vff/dotted-version-vectors-2012.pdf
 [paper crdt]: http://hal.inria.fr/docs/00/61/73/41/PDF/RR-7687.pdf
 [blog VV are not VC]: http://haslab.wordpress.com/2011/07/08/version-vectors-are-not-vector-clocks
@@ -597,6 +702,8 @@ anti-entropy), call `update_time` with the local node ID after calling `sync`.
 [Dot 4]: images/Dot4.png
 [DVVSet put]: images/PUT.png
 [DVVSet get]: images/GET.png
+[DVVSet Ack]: images/DVVsetPUTACK.png
+[DVVSetAck Put]: images/DVVSetACK.png
 [ord fun]: http://www.erlang.org/doc/man/lists.html#ordering_function
 [riak site]: http://basho.com/
 [riak github]: https://github.com/basho/riak
