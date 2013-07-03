@@ -13,7 +13,18 @@ databases with a get/put interface (has shown below).
 - [The Solution: Dotted Version Vector Sets](https://github.com/ricardobcl/Dotted-Version-Vectors#the-solution-dotted-version-vectors-sets)
 - [Real World with Riak](https://github.com/ricardobcl/Dotted-Version-Vectors#real-world-with-riak)
 - [How to Use](https://github.com/ricardobcl/Dotted-Version-Vectors#how-to-use)
-- [*Variations*](https://github.com/ricardobcl/Dotted-Version-Vectors#dvvsets-variations)
+- [Variations:](https://github.com/ricardobcl/Dotted-Version-Vectors#dvvsets-variations)
+    * [Removing old entries](https://github.com/ricardobcl/Dotted-Version-Vectors#removing-old-entries)
+    * [Consecutive and concurrent writes](https://github.com/ricardobcl/Dotted-Version-Vectors#consecutive-and-concurrent-writes)
+
+##### Brief note on notation
+
+{ ... } is a *set* (no order or duplicates)
+
+[ ... ] is a *list* (like an array, has order)
+
+( ... ) is a *n-tuple* (pair, triples, etc.)
+
 
 ## Intro
 
@@ -621,6 +632,8 @@ the events (dots) with values, represented by tuples `(dot, value)`.
 
 
 #### Example
+
+(Unlike previous illustrations, lets make responses to client requests explicit.)
 
 With DVVSet:
 ![DVVSet Ack][DVVSet Ack]
