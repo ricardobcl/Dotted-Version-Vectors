@@ -599,36 +599,38 @@ anti-entropy), call `update_time` with the local node ID after calling `sync`.
 
 ### Consecutive and concurrent writes
 
-A write can acknowledge to the client if it succeeded and also return the causal
-information for that key, without the siblings, which avoid having to read from
-the system to do a new write. This returned context after a successful put has
-one limitation: if the server ends up with siblings after the write, the
-returned context cannot be used to do new writes because we have to read those
-siblings, otherwise new we would overwrite siblings without even reading them,
-causing information loss for other clients.
+A write can acknowledge to the client if it succeeded. It can also return the
+causal information for that key (context), without the values/siblings, which
+avoids the need to read from the system to do a new write. This returned context
+after a successful put has one limitation: if the server ends up with siblings
+after a write, the returned context cannot be used to do new writes, since it
+represents siblings the client did not read or knows their values. We have to
+read those siblings, otherwise we would overwrite them, causing information loss
+for other clients.
 
 The point here is that the context returned from a put should represent the
 causal information known by that write, including the new value, and not contain
-causal information about siblings created concurrently.
+causal information about siblings created concurrently from others clients.
 
 We modified DVVSets to support consecutive and concurrent writes, at the expense
-of losing some compactness of the original DVVSet. The file
-[dvvset\_put\_ack][dvvset ack put] implements this version. Lets call it
+of losing some of the compactness in the original DVVSets. The file
+[dvvset\_put\_ack][dvvset ack put] implements this version, which we call
 *DVVSetAck* below, for brevity.
 
 The main difference between them is that DVVSetAck supports non-contiguous
 causal information. Thus, we can now acknowledge a write to the client with the
 same context provided for that operation, plus the a new single dot that
 represents the new value/sibling written. With this, multiple clients can do
-consecutive writes without having to read if siblings were generated from other
-sources. Clients now don't even have to check if there are siblings, since we
-don't return contexts that overwrite siblings that were not read/write from this
-client.
+consecutive writes without being forced to read, if siblings were generated from
+other sources. Clients now don't even have to check if there are siblings before
+writing again, since we don't return contexts after a put that represent and
+overwrite siblings which this client does not know about.
 
-Now, each entry in the DVVSet in 4-tuple `(id, base, dots, values)`. The `base`
-represents the contiguous causal events without values, the `dots` are events (dots)
-without values that are not contiguous with the `base`. Finally, `values` are
-the events (dots) with values, represented by tuples `(dot, value)`.
+Each entry of the DVVSetAck is a 4-tuple `(id, base, dots, values)`. The `base`
+represents the largest contiguous causal events without values, beginning at 0.
+The `dots` are all the individual causal events without values, that aren't
+contiguous with the `base`. Finally, `values` are the single events (dots) with
+values, represented by tuples `(dot, value)`.
 
 
 #### Example
@@ -641,27 +643,25 @@ With DVVSet:
 With DVVSetAck:
 ![DVVSetAck put][DVVSetAck Put]
 
-Under DVVSet (or VV), if there is a conflict, we must read all siblings, because
-DVVSet (and VV) only return as context a contiguous causal history. We observe
-this case in the example: with DVVSet, when client C2 wants to write *v3* it
-can't do it immediately, because the acknowledge from writing *v2* tells him
-that there are siblings, thus writing *v3* with that context would overwrite
-them (in this case *v1*). Thus, C2 must read that key to obtain all the siblings
-and their respective context, before writing *v3*. 
+With DVVSets (or VV), when client C2 wants to write *v3* it can't do it
+immediately, because the acknowledgment from writing *v2* tells that there are
+siblings, thus writing *v3* with that context would overwrite them (in this case
+*v1*). Thus, C2 must read that key to obtain all the siblings and their
+respective context, resolve them and maybe write *v3* (the client may want to
+write another value, after resolving the conflicts, which were unknown when the
+intention was to write *v3*). **It forces the client to resolve conflicts before
+being able to write again!**
 
-**It forces the client to resolve conflicts before being able to write again!**
-
-With our modification to DVVSet, we can write multiple times without doing
-explicit reads, as we can see from the second put by client C2, where we
-overwrite *v2* without reading or losing the sibling *v1*.
+With our modification to DVVSets, we can write multiple times without doing
+reading or resolving conflicts, as we can see from the second put by client C2,
+where we overwrite *v2* without reading or losing the sibling *v1*.
 
 #### Usage
 
 We have a new function `event` that is used exactly as `update`, but returns a
 DVVSet containing only the context and the new dot for the value. Now we can
-call `join` to extract the causal information and return that as acknowledge
-context to the client. Finally, we call `sync` to synchronize with the local
-DVVSet.
+call `join` to extract the causal information and return that as acknowledgment
+to the client. Finally, we call `sync` to synchronize with the local DVVSet.
 
 The function `update` still exists and can be used as before. All it does is
 encapsulate `event` and `sync` in one function.
