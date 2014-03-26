@@ -1,7 +1,8 @@
 # Dotted Version Vector Sets
 ## Managing Values with Causality
 
-**TL;DR** Dotted Version Vector Sets are similar to Version Vectors (Vector
+**TL;DR** [Dotted Version Vector Sets](http://haslab.uminho.pt/tome/files/dvvset-dais.pdf) 
+are similar to Version Vectors (Vector
 Clocks for some), but prevent false conflicts that can occur with Version
 Vectors. It also has a more complete API and is better suited to distributed
 databases with a get/put interface (has shown below).
@@ -29,7 +30,7 @@ databases with a get/put interface (has shown below).
 ## Intro
 
 We are presenting the **compact** version of the original [Dotted Version
-Vectors][paper dvv](DVV), which we call **Dotted Version Vector Set (DVVSet)**.
+Vectors][paper dvv](DVV), which we call [Dotted Version Vector Sets (DVVSet)](http://haslab.uminho.pt/tome/files/dvvset-dais.pdf).
 Like its predecessor, DVVSet still accurately describes causality between
 related or conflicting values (values that reflect concurrent updates and that
 must be all kept until a future reconciliation supersedes them), but now with a
