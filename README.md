@@ -17,6 +17,7 @@ databases with a get/put interface (has shown below).
 - [Variations:](https://github.com/ricardobcl/Dotted-Version-Vectors#dvvsets-variations)
     * [Removing old entries](https://github.com/ricardobcl/Dotted-Version-Vectors#removing-old-entries)
     * [Consecutive and concurrent writes](https://github.com/ricardobcl/Dotted-Version-Vectors#consecutive-and-concurrent-writes)
+    * [Both^](https://github.com/ricardobcl/Dotted-Version-Vectors#both-removing-old-entries-consecutive-and-concurrent-writes)
 
 ##### Brief note on notation
 
@@ -634,6 +635,11 @@ contiguous with the `base`. Finally, `values` are the single events (dots) with
 values, represented by tuples `(dot, value)`.
 
 
+### BOTH: Removing old entries + Consecutive and concurrent writes
+
+We also provide an implementation of both variations:
+[dvvset\_prune\_put\_ack][dvvset prune ack put].
+
 #### Example
 
 (Unlike previous illustrations, lets make responses to client requests explicit.)
@@ -698,6 +704,7 @@ encapsulate `event` and `sync` in one function.
 [dvvset original]: https://github.com/ricardobcl/Dotted-Version-Vectors/blob/master/dvvset.erl
 [dvvset prune]: https://github.com/ricardobcl/Dotted-Version-Vectors/blob/master/dvvset_prune.erl
 [dvvset ack put]: https://github.com/ricardobcl/Dotted-Version-Vectors/blob/master/dvvset_put_ack.erl
+[dvvset prune ack put]: https://github.com/ricardobcl/Dotted-Version-Vectors/blob/master/dvvset_prune_put_ack.erl
 [paper dvv]: http://gsd.di.uminho.pt/members/vff/dotted-version-vectors-2012.pdf
 [paper crdt]: http://hal.inria.fr/docs/00/61/73/41/PDF/RR-7687.pdf
 [blog VV are not VC]: http://haslab.wordpress.com/2011/07/08/version-vectors-are-not-vector-clocks
