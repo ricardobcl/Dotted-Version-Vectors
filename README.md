@@ -18,6 +18,7 @@ databases with a get/put interface (has shown below).
     * [Removing old entries](https://github.com/ricardobcl/Dotted-Version-Vectors#removing-old-entries)
     * [Consecutive and concurrent writes](https://github.com/ricardobcl/Dotted-Version-Vectors#consecutive-and-concurrent-writes)
     * [Both^](https://github.com/ricardobcl/Dotted-Version-Vectors#both-removing-old-entries--consecutive-and-concurrent-writes)
+
 ##### Brief note on notation
 
 { ... } is a *set* (no order or duplicates)
