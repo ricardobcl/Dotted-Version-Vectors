@@ -5,7 +5,7 @@
 are similar to Version Vectors (Vector
 Clocks for some), but prevent false conflicts that can occur with Version
 Vectors. It also has a more complete API and is better suited to distributed
-databases with a get/put interface (has shown below).
+databases with a get/put interface (as shown below).
 
 ### Contents
 
