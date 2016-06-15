@@ -1,0 +1,14 @@
+% This is an -*- erlang -*- file.
+
+{application, dvv,
+ [{description, "DVV"},
+  {vsn, "0.5.0"},
+  {modules, [dvv,
+             dvvset,
+             dvvset_prune,
+             dvvset_prune_put_ack,
+             dvvsset_put_ack
+            ]},
+  {applications, [kernel, stdlib]}
+ ]
+}.
