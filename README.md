@@ -679,11 +679,10 @@ encapsulate `event` and `sync` in one function.
         %% create a new DVVSet for the new value V
         NewDVVSet = dvvset:new(V),
         %% update the causal history of DVVSet using the server identifier
-        Dot = dvvset:event(NewDVVSet, ServerID),
-        AckContext = dvvset:join(Dot),
-        %% acknowledge the write with the context AckContext
-        DVVSet = dvvset:sync([LocalDVVSet, Dot]),
-        %% store DVVSet...
+        NewDVVSet2 = dvvset:event(NewDVVSet, ServerID),
+        AckContext = dvvset:join(NewDVVSet2),
+        %% acknowledge the write with the context AckContext...
+        %% store NewDVVSet2...
     ```
 
 2. **A client writes an updated value and an opaque (unaltered) version vector
@@ -694,8 +693,8 @@ encapsulate `event` and `sync` in one function.
         NewDVVSet = dvvset:new(Context, V),
         %% create a new DVVSet with a new Dot for the new value
         %% the result is only the previous context plus a new dot
-        Dot = dvvset:event(NewDVVSet, LocalDVVSet, ServerID),
-        AckContext = dvvset:join(Dot),
+        NewDVVSet2 = dvvset:event(NewDVVSet, LocalDVVSet, ServerID),
+        AckContext = dvvset:join(NewDVVSet2),
         %% acknowledge the write with the context AckContext
         DVVSet = dvvset:sync([LocalDVVSet, Dot]),
         %% store DVVSet...
